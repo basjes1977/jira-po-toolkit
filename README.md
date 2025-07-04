@@ -24,16 +24,6 @@
 - **2025-07-03**: Added blocked/on-hold story overviews, improved Excel/PowerPoint export, and unified menu.
 - **2025-07-01**: Initial release with PowerPoint generator, notification, and sanity check scripts.
 
-git clone <repo-url>
-cd JiraPresentationTool
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-export JT_JIRA_URL="https://<your-domain>.atlassian.net/"
-export JT_JIRA_USERNAME="your-email@domain.com"
-export JT_JIRA_PASSWORD="your-jira-api-token"
-export JT_JIRA_BOARD="<board-id>"
-python jpt.py
 
 # JiraPresentationTool - Unified Menu & Scripts
 
