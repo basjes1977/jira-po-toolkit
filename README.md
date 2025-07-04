@@ -121,4 +121,10 @@ You will see a menu with the following options:
 ## See each script's README for more details and usage examples.
 
 ---
-MIT License
+## 💖 Support
+
+This project is free to use, including for commercial purposes, under the MIT License.  
+If you find it useful and would like to support its development, consider buying me a coffee or making a donation:
+
+☕ [Buy Me a Coffee](https://coff.ee/basjes)  
+💸 [Donate via PayPal](https://paypal.me/basjes1977)
