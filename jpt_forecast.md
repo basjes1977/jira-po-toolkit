@@ -9,6 +9,7 @@ python jpt_forecast.py
 ```
 
 ## What it does
+
 - Fetches last 10 completed sprints from the configured board.
 - Calculates achieved story points and time.
 - Prompts for team member availability for the next sprint.
@@ -17,14 +18,17 @@ python jpt_forecast.py
 - Checks for Excel file lock before saving.
 
 ## Requirements
+
 - Jira API credentials in `.jira_environment` in the script directory.
 - Python 3.7+
 - `requests`, `openpyxl`
 
 ## Example Output
-```
+
+```text
 Excel file with sprint history and forecast saved as: sprint_forecast_history.xlsx
 ```
 
 ---
+
 MIT License
