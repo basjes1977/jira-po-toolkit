@@ -45,9 +45,7 @@ def get_blocked_stories():
 
 def print_results(issues):
     print("\nStories that are blocked by another work item:\n")
-    if not issues:
-        print("No blocked stories found.")
-        return
+    found = False
     for issue in issues:
         fields = issue["fields"]
         summary = fields.get("summary", "")
@@ -62,8 +60,12 @@ def print_results(issues):
                 blocker = link.get("inwardIssue", {}).get("key")
                 if blocker:
                     blockers.append(blocker)
-        blockers_str = ", ".join(blockers) if blockers else "None"
-        print(f"STORY: {issue['key']}: {summary}\n  Labels: {labels}\n  Assignee: {assignee_name}\n  Blocked by: {blockers_str}\n  {url}\n")
+        if blockers:  # Only print if there are blockers
+            found = True
+            blockers_str = ", ".join(blockers)
+            print(f"STORY: {issue['key']}: {summary}\n  Labels: {labels}\n  Assignee: {assignee_name}\n  Blocked by: {blockers_str}\n  {url}\n")
+    if not found:
+        print("No blocked stories found.")
 
 if __name__ == "__main__":
     issues = get_blocked_stories()
