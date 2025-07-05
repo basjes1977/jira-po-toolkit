@@ -24,6 +24,8 @@ JIRA_URL = JIRA_ENV.get("JT_JIRA_URL", "https://equinixjira.atlassian.net/").rst
 JIRA_EMAIL = JIRA_ENV.get("JT_JIRA_USERNAME")
 JIRA_API_TOKEN = JIRA_ENV.get("JT_JIRA_PASSWORD")
 BOARD_ID = JIRA_ENV.get("JT_JIRA_BOARD")
+FIELD_EPIC_LINK = JIRA_ENV.get("JT_JIRA_FIELD_EPIC_LINK", "customfield_10031")
+FIELD_ACCEPTANCE_CRITERIA = JIRA_ENV.get("JT_JIRA_FIELD_ACCEPTANCE_CRITERIA", "customfield_10140")
 
 # --- Fetch all Epics and Stories in 'To Refine' state ---
 def get_to_refine_issues():
@@ -39,7 +41,7 @@ def get_to_refine_issues():
             "jql": "(issuetype = Epic OR issuetype = Story) AND status = 'To Refine'",
             "startAt": start_at,
             "maxResults": 50,
-            "fields": "summary,issuetype,labels,customfield_10031,epic,acceptanceCriteria,customfield_10140,parent"
+            "fields": f"summary,issuetype,labels,{FIELD_EPIC_LINK},epic,acceptanceCriteria,{FIELD_ACCEPTANCE_CRITERIA},parent"
         }
         resp = requests.get(url, params=params, auth=(JIRA_EMAIL, JIRA_API_TOKEN))
         resp.raise_for_status()
@@ -60,8 +62,7 @@ def group_and_sort_issues(issues):
         if issuetype == "Epic":
             grouped[issue["key"]]["epic"] = issue
         else:
-            # Try to get epic link from customfield_10031 (Jira default Epic Link field)
-            epic_link = fields.get("customfield_10031")
+            epic_link = fields.get(FIELD_EPIC_LINK)
             grouped[epic_link]["stories"].append(issue)
     return grouped
 
@@ -71,10 +72,7 @@ def check_missing(issue):
     missing = []
     if not fields.get("labels"):
         missing.append("No Label")
-    # Only check customfield_10140 for acceptance criteria
-    ac = fields.get("customfield_10140")
-    # Debug: print the value seen for customfield_10140
-    # print(f"DEBUG: customfield_10140 for {issue.get('key')}: {repr(ac)}")
+    ac = fields.get(FIELD_ACCEPTANCE_CRITERIA)
     def has_bullet_with_text(val):
         if not isinstance(val, str):
             return False

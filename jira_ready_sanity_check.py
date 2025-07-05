@@ -24,6 +24,7 @@ JIRA_URL = JIRA_ENV.get("JT_JIRA_URL", "https://equinixjira.atlassian.net/").rst
 JIRA_EMAIL = JIRA_ENV.get("JT_JIRA_USERNAME")
 JIRA_API_TOKEN = JIRA_ENV.get("JT_JIRA_PASSWORD")
 BOARD_ID = JIRA_ENV.get("JT_JIRA_BOARD")
+FIELD_ACCEPTANCE_CRITERIA = JIRA_ENV.get("JT_JIRA_FIELD_ACCEPTANCE_CRITERIA", "customfield_10140")
 
 # --- Label order from jpt.py ---
 LABEL_ORDER = [
@@ -46,7 +47,7 @@ def get_ready_stories():
             "jql": "issuetype = Story AND status = 'Ready'",
             "startAt": start_at,
             "maxResults": 50,
-            "fields": "summary,issuetype,labels,customfield_10140"
+            "fields": f"summary,issuetype,labels,{FIELD_ACCEPTANCE_CRITERIA}"
         }
         resp = requests.get(url, params=params, auth=(JIRA_EMAIL, JIRA_API_TOKEN))
         resp.raise_for_status()
@@ -58,7 +59,7 @@ def get_ready_stories():
     return issues
 
 def has_acceptance_criteria(fields):
-    ac = fields.get("customfield_10140")
+    ac = fields.get(FIELD_ACCEPTANCE_CRITERIA)
     if not isinstance(ac, str):
         return False
     for line in ac.splitlines():

@@ -29,6 +29,7 @@ JIRA_URL = JIRA_ENV.get("JT_JIRA_URL", "https://equinixjira.atlassian.net/").rst
 JIRA_EMAIL = JIRA_ENV.get("JT_JIRA_USERNAME")
 JIRA_API_TOKEN = JIRA_ENV.get("JT_JIRA_PASSWORD")
 BOARD_ID = JIRA_ENV.get("JT_JIRA_BOARD")
+FIELD_STORY_POINTS = JIRA_ENV.get("JT_JIRA_FIELD_STORY_POINTS", "customfield_10024")
 
 
 def get_sprints(state="closed", max_results=10):
@@ -74,7 +75,7 @@ def achieved_points_and_time(issues):
         fields = issue["fields"]
         status = fields.get("status", {}).get("name", "").lower()
         if status in ("done", "closed", "resolved"):
-            story_points = fields.get("customfield_10024")
+            story_points = fields.get(FIELD_STORY_POINTS)
             if story_points not in (None, "?") and str(story_points).strip() != "":
                 try:
                     points += float(story_points)
