@@ -37,10 +37,15 @@ This project was inspired by a script a colleague had created, but that solution
 ### 1. Generate Sprint PowerPoint Presentation (`jpt.py`)
 
 - **Purpose:** Generates a PowerPoint presentation for the current sprint, grouped by label, with summary and upcoming slides.
+- **Features:**
+  - Emoji spinner for progress indication during data fetch and presentation creation.
+  - Handles file locking: prompts you to close the PowerPoint file if it is open before saving.
+  - Output file name is sanitized to remove problematic characters.
+  - Only issues of type 'story' or 'task' are included.
+  - Adds summary, upcoming, and "thanks" slides using the template.
 - **Instructions:**
   - Ensure `sprint-template.pptx` is present in the script directory.
   - Output file is named after the sprint (e.g., `Sprint 42.pptx`).
-  - Only issues of type 'story' or 'task' are included.
 - [See detailed README](./jpt.md)
 
 ### 2. Send Jira TODO Notification Email (`jira_todo_notify.py`)
@@ -83,6 +88,16 @@ This project was inspired by a script a colleague had created, but that solution
   - Exports results and forecast to Excel, appending new sprints only, with trend charts.
   - Close the Excel file before running.
 - [See detailed README](./jpt_forecast.md)
+
+---
+
+## Troubleshooting
+
+- **SSL/Certificate Issues (e.g., Zscaler):**
+  - If you encounter SSL errors, set the environment variable `REQUESTS_CA_BUNDLE` to your Zscaler certificate file path.
+  - Example: `export REQUESTS_CA_BUNDLE=/path/to/zscaler.pem`
+- **PowerPoint File Lock:**
+  - If the script cannot save the presentation, close the PowerPoint file and press Enter when prompted.
 
 ---
 
