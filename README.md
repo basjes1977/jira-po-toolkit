@@ -129,6 +129,34 @@ This project was inspired by a script a colleague had created, but that solution
 
 ---
 
+## How to Acquire a Jira API Token
+
+To use these scripts, you need a Jira API token for authentication. Follow these steps:
+
+1. **Go to Atlassian API tokens:**
+   [https://id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens)
+
+2. **Click "Create API token".**
+
+3. **Enter a label** (e.g., "JiraPresentationTool") and click **Create**.
+
+4. **Copy the generated token** and save it somewhere safe.
+   **You will not be able to see it again!**
+
+5. **Use this token as `JT_JIRA_PASSWORD`** in your `.jira_environment` file:
+   ```sh
+   export JT_JIRA_PASSWORD="your-jira-api-token"
+   ```
+
+6. **Use your Atlassian email address** as `JT_JIRA_USERNAME`.
+
+**More info:**
+See Atlassian’s documentation: [Manage API tokens for your Atlassian account](https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/)
+
+---
+
+---
+
 ## Setup: .jira_environment
 
 Before running any scripts, create a file named `.jira_environment` in the script directory with the following content:
@@ -161,7 +189,7 @@ After editing, restart your terminal or reload your environment to apply the cha
 
 ---
 
-**Tip:**  
+**Tip:**
 You can find your custom field IDs using the Jira REST API. See the main README for instructions.
 
 ---
@@ -174,10 +202,10 @@ See each script's README for more details and usage examples.
 
 ## Support
 
-This project is free to use, including for commercial purposes, under the MIT License.  
+This project is free to use, including for commercial purposes, under the MIT License.
 If you find it useful and would like to support its development, consider buying me a coffee or making a donation:
 
-☕ [Buy Me a Coffee](https://coff.ee/basjes)  
+☕ [Buy Me a Coffee](https://coff.ee/basjes)
 💸 [Donate via PayPal](https://paypal.me/basjes1977)
 
 ---
