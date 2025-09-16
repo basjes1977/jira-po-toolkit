@@ -117,17 +117,17 @@ def group_issues_by_label(issues):
     Only includes issues of type 'story' or 'task'.
     Returns a dict: label -> list of issues, in the order of the label list, with 'Other' for unmatched.
     """
-    LABEL_ORDER = [
-        "NLMS",
-        "IEMS",
-        "ESMS",
-        "UKMS",
-        "S&A-MPC",
-        "S&A_MGT",
-        "FIMS",
-    ]
-    label_order_lower = [l.lower() for l in LABEL_ORDER]
-    grouped = {label: [] for label in LABEL_ORDER}
+    LABEL_MAP = {
+        "nlms": "Dutch Platform(s)",
+        "iems": "Irish Platform(s)",
+        "esms": "Spanish Platform(s)",
+        "ukms": "UK Platform(s)",
+        "s&a-mpc": "MPC",
+        "s&a_mgt": "Management tasks",
+        "fims": "Finnish Platform(s)",
+    }
+    LABEL_ORDER = list(LABEL_MAP.keys())
+    grouped = {LABEL_MAP[label]: [] for label in LABEL_ORDER}
     grouped["Other"] = []
     for issue in issues:
         fields = issue["fields"]
@@ -136,9 +136,9 @@ def group_issues_by_label(issues):
             continue
         labels = [l.lower() for l in fields.get("labels", [])]
         found = False
-        for idx, label in enumerate(label_order_lower):
-            if label in labels:
-                grouped[LABEL_ORDER[idx]].append(issue)
+        for label_key in LABEL_ORDER:
+            if label_key in labels:
+                grouped[LABEL_MAP[label_key]].append(issue)
                 found = True
                 break
         if not found:
