@@ -9,14 +9,24 @@ This project was inspired by a script a colleague had created, but that solution
 
 ## Table of Contents
 
+- [Contributor Notes](#contributor-notes)
 - [Getting Started](#getting-started)
 - [Menu Options & Scripts](#menu-options--scripts)
+- [Troubleshooting](#troubleshooting)
 - [Setup](#setup)
+- [How to Acquire a Jira API Token](#how-to-acquire-a-jira-api-token)
+- [Environment Configuration](#environment-configuration)
 - [See Also](#see-also)
 - [Support](#support)
 - [Changelog](#changelog)
 - [How to Find Custom Field IDs in Jira](#how-to-find-custom-field-ids-in-jira)
 - [License](#license)
+
+---
+
+## Contributor Notes
+
+- Keep this README and `AGENTS.md` aligned whenever scripts, dependencies, or workflows change so new contributors always have an up-to-date quickstart plus deeper agent guidance.
 
 ---
 
@@ -62,6 +72,7 @@ This project was inspired by a script a colleague had created, but that solution
 - **Instructions:**
   - Acceptance criteria must be a markdown list in the custom field.
   - Results are grouped by Epic.
+  - Run with `python jira_refine_sanity_check.py --fix-labels` to interactively add one or more labels (comma-separated) to unlabeled stories; defaults come from sibling stories/epics. When launched without flags (via the menu) you’ll be prompted to add labels automatically if any are missing.
 - [See detailed README](./jira_refine_sanity_check.md)
 
 ### 4. Check 'Ready' Stories (Sanity Check) (`jira_ready_sanity_check.py`)
@@ -144,6 +155,7 @@ To use these scripts, you need a Jira API token for authentication. Follow these
    **You will not be able to see it again!**
 
 5. **Use this token as `JT_JIRA_PASSWORD`** in your `.jira_environment` file:
+
    ```sh
    export JT_JIRA_PASSWORD="your-jira-api-token"
    ```
@@ -155,9 +167,7 @@ See Atlassian’s documentation: [Manage API tokens for your Atlassian account](
 
 ---
 
----
-
-## Setup: .jira_environment
+## Environment Configuration
 
 Before running any scripts, create a file named `.jira_environment` in the script directory with the following content:
 
@@ -185,12 +195,14 @@ export SMTP_FROM="your-email@domain.com"
 - **Custom Fields:** If your Jira uses different custom field IDs, update them here.
 - **SMTP:** Only needed for scripts that send email notifications.
 
+All scripts import credentials via `jira_config.py`, so updating this single file keeps every CLI in sync.
+
 After editing, restart your terminal or reload your environment to apply the changes.
 
 ---
 
 **Tip:**
-You can find your custom field IDs using the Jira REST API. See the main README for instructions.
+You can find your custom field IDs using the Jira REST API. See [How to Find Custom Field IDs in Jira](#how-to-find-custom-field-ids-in-jira) for step-by-step instructions.
 
 ---
 

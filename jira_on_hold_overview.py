@@ -15,25 +15,9 @@ Requirements:
 Jira API Reference: https://developer.atlassian.com/cloud/jira/platform/rest/v3/intro/
 """
 
-import os
-import sys
-from pathlib import Path
 import requests
 
-def load_jira_env():
-    """Load Jira credentials from .jira_environment file."""
-    env_path = Path(__file__).parent / ".jira_environment"
-    env = {}
-    if env_path.exists():
-        with open(env_path) as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("export "):
-                    line = line[len("export ") :]
-                if "=" in line:
-                    k, v = line.split("=", 1)
-                    env[k.strip()] = v.strip().strip('"')
-    return env
+from jira_config import load_jira_env
 
 JIRA_ENV = load_jira_env()
 JIRA_URL = JIRA_ENV.get("JT_JIRA_URL", "https://equinixjira.atlassian.net/").rstrip("/")

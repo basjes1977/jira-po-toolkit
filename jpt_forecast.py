@@ -1,28 +1,13 @@
-import requests
 import os
-from pathlib import Path
 from collections import defaultdict
-import openpyxl
-from openpyxl.utils import get_column_letter
-from openpyxl.chart import LineChart, Reference
 import time as _time
 
-# Load Jira credentials from .jira_environment
+import openpyxl
+from openpyxl.chart import LineChart, Reference
+from openpyxl.utils import get_column_letter
+import requests
 
-def load_jira_env():
-    env_path = Path(__file__).parent / ".jira_environment"
-    if env_path.exists():
-        env = {}
-        with open(env_path) as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("export "):
-                    line = line[len("export "):]
-                    if "=" in line:
-                        k, v = line.split("=", 1)
-                        env[k.strip()] = v.strip().strip('"')
-        return env
-    return {}
+from jira_config import load_jira_env
 
 JIRA_ENV = load_jira_env()
 JIRA_URL = JIRA_ENV.get("JT_JIRA_URL", "https://equinixjira.atlassian.net/").rstrip("/")

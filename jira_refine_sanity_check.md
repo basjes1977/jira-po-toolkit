@@ -8,6 +8,10 @@ Checks all Epics and Stories in 'To Refine' state for missing labels and accepta
 python jira_refine_sanity_check.py
 ```
 
+### Optional Flags
+
+- `--fix-labels`: interactively add one or more (comma-separated) labels to any story that is missing them. Suggestions are drawn from sibling stories and the parent epic. When the script runs without flags (e.g., through `jpt_menu.py`) it will automatically offer to launch this helper if unlabeled stories are detected.
+
 ## What it does
 
 - Fetches all Epics and Stories in 'To Refine' state from the configured board.
