@@ -71,3 +71,4 @@ coverage.xml
 
 # Ignore settings and secrets
 settings.json
+AGENTS.md
