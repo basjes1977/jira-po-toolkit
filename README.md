@@ -34,7 +34,20 @@ This project was inspired by a script a colleague had created, but that solution
 
 1. **Clone the repository and install dependencies** (see [Setup](#setup)).
 2. **Configure your Jira credentials** in `.jira_environment`.
-3. **Run the menu:**
+3. **Activate the virtual environment:**
+
+   **Option A: Manual activation** (required each time you open a new terminal):
+   ```sh
+   source .venv/bin/activate  # On macOS/Linux
+   # .venv\Scripts\activate   # On Windows
+   ```
+
+   **Option B: Automatic activation** (recommended - set up once, see [Automatic Virtual Environment Activation](#automatic-virtual-environment-activation-optional-but-recommended)):
+   - Install and configure `direnv`
+   - Run `direnv allow` in the project directory
+   - The venv will auto-activate when you `cd` into the directory
+
+4. **Run the menu:**
 
    ```sh
    python jpt_menu.py
@@ -106,6 +119,16 @@ This project was inspired by a script a colleague had created, but that solution
 
 ## Troubleshooting
 
+- **Virtual Environment Issues:**
+  - If you see errors like "bad interpreter" or "no such file or directory" when running Python/pip, your virtual environment may be corrupted
+  - Solution: Remove and recreate the virtual environment:
+    ```sh
+    rm -rf .venv
+    python3 -m venv .venv
+    source .venv/bin/activate
+    pip install -r requirements.txt
+    ```
+
 - **SSL/Certificate Issues (e.g., Zscaler):**
   - When you run `jpt_menu.py`, you'll be prompted to choose SSL verification mode:
     - **Option 1**: Use Zscaler certificate (if you're behind Zscaler proxy)
@@ -113,6 +136,7 @@ This project was inspired by a script a colleague had created, but that solution
     - **Option 3**: Disable SSL verification (bypasses security, use for testing only)
   - If you get "certificate verify failed" errors with option 2, you're likely behind Zscaler and should use option 1
   - This configuration is set once per session when you start the menu
+
 - **PowerPoint File Lock:**
   - If the script cannot save the presentation, close the PowerPoint file and press Enter when prompted.
 
@@ -120,16 +144,27 @@ This project was inspired by a script a colleague had created, but that solution
 
 ## Setup
 
+**Prerequisites:** Python 3.7 or higher
+
 1. **Create and activate a virtual environment (recommended):**
 
    ```sh
    python3 -m venv .venv
-   source .venv/bin/activate
+   source .venv/bin/activate  # On macOS/Linux
+   # .venv\Scripts\activate   # On Windows
    ```
 
+   Your prompt should now show `(.venv)` at the beginning.
+
 2. **Install dependencies:**
-   - Python 3.7+
-   - `pip install -r requirements.txt`
+
+   With the virtual environment activated, run:
+
+   ```sh
+   pip install -r requirements.txt
+   ```
+
+   This will install: `requests`, `python-pptx`, `openpyxl`, `python-dotenv`, and dependencies.
 
 3. **Configure Jira credentials:**
    - Create `.jira_environment` in the script directory:
@@ -143,6 +178,73 @@ This project was inspired by a script a colleague had created, but that solution
 
 4. **Templates:**
    - For PowerPoint export, place `sprint-template.pptx` in the script directory.
+
+5. **Verify installation:**
+
+   Test that all modules import correctly:
+
+   ```sh
+   python -c "import jira_config, jpt, jira_metrics; print('✓ Installation successful')"
+   ```
+
+---
+
+## Automatic Virtual Environment Activation (Optional but Recommended)
+
+To automatically activate the virtual environment when you enter the project directory, you can use `direnv`:
+
+### Installing direnv
+
+**macOS (using Homebrew):**
+```sh
+brew install direnv
+```
+
+**Linux (Ubuntu/Debian):**
+```sh
+sudo apt install direnv
+```
+
+**Linux (other distributions):**
+See [direnv installation guide](https://direnv.net/docs/installation.html)
+
+### Configuring direnv
+
+After installing direnv, add the following to your shell configuration file:
+
+**For Bash** (`~/.bashrc` or `~/.bash_profile`):
+```sh
+eval "$(direnv hook bash)"
+```
+
+**For Zsh** (`~/.zshrc`):
+```sh
+eval "$(direnv hook zsh)"
+```
+
+**For Fish** (`~/.config/fish/config.fish`):
+```sh
+direnv hook fish | source
+```
+
+Then **reload your shell** for the changes to take effect:
+```sh
+source ~/.bashrc  # For Bash
+source ~/.zshrc   # For Zsh
+```
+
+Or simply open a new terminal window/tab.
+
+### Allowing direnv
+
+The first time you enter the project directory after installing direnv, run:
+```sh
+direnv allow
+```
+
+This authorizes direnv to automatically load the `.envrc` file in this directory.
+
+**Done!** Now whenever you `cd` into the project directory, the virtual environment will activate automatically, and it will deactivate when you leave.
 
 ---
 
