@@ -8,12 +8,24 @@ Split from jpt.py for modularity.
 import sys
 import os
 from pptx import Presentation
-from pptx.util import Pt
+from pptx.util import Pt, Inches
+from pptx.chart.data import CategoryChartData
+from pptx.enum.chart import XL_CHART_TYPE
 import logging
 
 logger = logging.getLogger("jpt_presentation")
 
-def create_presentation(grouped_issues, sprint_name, sprint_start, sprint_end, filename="Sprint_Review.pptx", epic_map=None, epic_goals=None, planned_items=None):
+def create_presentation(
+    grouped_issues,
+    sprint_name,
+    sprint_start,
+    sprint_end,
+    filename="Sprint_Review.pptx",
+    epic_map=None,
+    epic_goals=None,
+    planned_items=None,
+    velocity_history=None,
+):
     """
     Create a PowerPoint presentation from grouped Jira issues.
     - Each label gets a slide with issues listed in the BODY placeholder.
@@ -280,7 +292,6 @@ def create_presentation(grouped_issues, sprint_name, sprint_start, sprint_end, f
                     except Exception:
                         continue
                 if not placed and page_lines:
-                    from pptx.util import Inches
                     txBox = slide.shapes.add_textbox(Inches(0.5), Inches(1.2), Inches(9), Inches(5.0))
                     tf = txBox.text_frame
                     tf.text = '\n'.join(page_lines)
@@ -288,6 +299,40 @@ def create_presentation(grouped_issues, sprint_name, sprint_start, sprint_end, f
                         paragraph.font.size = Pt(16)
             except (KeyError, IndexError, AttributeError):
                 pass
+
+    # Velocity slide (based on recent sprint history)
+    if velocity_history:
+        slide = prs.slides.add_slide(title_content_layout)
+        if slide.shapes.title:
+            slide.shapes.title.text = f"Velocity (Last {len(velocity_history)} Sprints)"
+        history = list(reversed(velocity_history))  # oldest -> newest
+        categories = [entry.get("name") or "Sprint" for entry in history]
+        points_series = [(entry.get("points") or 0.0) for entry in history]
+        hours_series = [round(((entry.get("time_seconds") or 0) / 3600.0), 1) for entry in history]
+
+        chart_data = CategoryChartData()
+        chart_data.categories = categories
+        chart_data.add_series("Completed Points", points_series)
+        chart_data.add_series("Logged Hours", hours_series)
+
+        chart = slide.shapes.add_chart(
+            XL_CHART_TYPE.LINE_MARKERS,
+            Inches(0.5),
+            Inches(1.4),
+            Inches(9),
+            Inches(4.3),
+            chart_data,
+        ).chart
+        chart.has_legend = True
+        if chart.category_axis:
+            chart.category_axis.tick_labels.font.size = Pt(11)
+        if chart.value_axis:
+            chart.value_axis.tick_labels.font.size = Pt(11)
+
+        avg_points = sum(points_series) / len(points_series) if points_series else None
+        textbox = slide.shapes.add_textbox(Inches(0.5), Inches(5.9), Inches(9), Inches(1.2))
+        tf = textbox.text_frame
+        tf.text = f"Average completed points: {avg_points:.1f}" if avg_points is not None else "Average completed points: n/a"
 
     thanks_layout = get_layout_by_name(prs, "thanks")
     prs.slides.add_slide(thanks_layout)

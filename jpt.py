@@ -25,12 +25,14 @@ import logging
 
 # Load Jira credentials from .jira_environment
 from jira_config import load_jira_env
+from jira_metrics import build_velocity_history
 
 JIRA_ENV = load_jira_env()
 JIRA_URL = JIRA_ENV.get("JT_JIRA_URL", "https://equinixjira.atlassian.net/").rstrip("/")
 JIRA_EMAIL = JIRA_ENV.get("JT_JIRA_USERNAME")
 JIRA_API_TOKEN = JIRA_ENV.get("JT_JIRA_PASSWORD")
 BOARD_ID = JIRA_ENV.get("JT_JIRA_BOARD")
+FIELD_STORY_POINTS = JIRA_ENV.get("JT_JIRA_FIELD_STORY_POINTS", "customfield_10024")
 
 # Configure logging
 logger = logging.getLogger("jpt")
@@ -799,7 +801,29 @@ if __name__ == "__main__":
             except Exception:
                 logger.exception("Failed to dump epic_initiative_map")
 
-        create_presentation(grouped, sprint_name, sprint_start, sprint_end, filename=filename, epic_map=epic_map, epic_goals=epic_initiative_map, planned_items=planned_items)
+        velocity_history = []
+        try:
+            velocity_history = build_velocity_history(
+                JIRA_URL,
+                BOARD_ID,
+                (JIRA_EMAIL, JIRA_API_TOKEN),
+                FIELD_STORY_POINTS,
+                max_sprints=10,
+            )
+        except Exception as exc:
+            logger.debug("Unable to build velocity history: %s", exc)
+
+        create_presentation(
+            grouped,
+            sprint_name,
+            sprint_start,
+            sprint_end,
+            filename=filename,
+            epic_map=epic_map,
+            epic_goals=epic_initiative_map,
+            planned_items=planned_items,
+            velocity_history=velocity_history,
+        )
         spinner_message[0] = "Done!"
     finally:
         spinner_running = False

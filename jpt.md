@@ -11,7 +11,7 @@ python jpt.py
 ## What it does
 
 - Fetches Jira sprint data and generates a PowerPoint presentation using a template.
-- Groups issues by label, displays issue details, and includes summary and upcoming slides.
+- Groups issues by label, displays issue details, and includes summary, velocity (last 5 sprints with chart), upcoming, and thanks slides.
 - Output file is named after the sprint (e.g., `Sprint 42.pptx`).
 - Only issues of type 'story' or 'task' are included.
 

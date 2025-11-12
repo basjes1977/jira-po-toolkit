@@ -5,9 +5,8 @@ import time as _time
 import openpyxl
 from openpyxl.chart import LineChart, Reference
 from openpyxl.utils import get_column_letter
-import requests
-
 from jira_config import load_jira_env
+from jira_metrics import achieved_points_and_time, get_recent_sprints, get_sprint_issues
 
 JIRA_ENV = load_jira_env()
 JIRA_URL = JIRA_ENV.get("JT_JIRA_URL", "https://equinixjira.atlassian.net/").rstrip("/")
@@ -15,33 +14,7 @@ JIRA_EMAIL = JIRA_ENV.get("JT_JIRA_USERNAME")
 JIRA_API_TOKEN = JIRA_ENV.get("JT_JIRA_PASSWORD")
 BOARD_ID = JIRA_ENV.get("JT_JIRA_BOARD")
 FIELD_STORY_POINTS = JIRA_ENV.get("JT_JIRA_FIELD_STORY_POINTS", "customfield_10024")
-
-
-def get_sprints(state="closed", max_results=10):
-    url = f"{JIRA_URL}/rest/agile/1.0/board/{BOARD_ID}/sprint?state={state}"
-    resp = requests.get(url, auth=(JIRA_EMAIL, JIRA_API_TOKEN))
-    resp.raise_for_status()
-    sprints = resp.json().get("values", [])
-    # Sort by endDate descending if available
-    sprints = [s for s in sprints if s.get("endDate")]
-    sprints.sort(key=lambda s: s["endDate"], reverse=True)
-    return sprints[:max_results]
-
-
-def get_issues(sprint_id):
-    url = f"{JIRA_URL}/rest/agile/1.0/sprint/{sprint_id}/issue"
-    issues = []
-    start_at = 0
-    while True:
-        params = {"startAt": start_at, "maxResults": 50}
-        resp = requests.get(url, params=params, auth=(JIRA_EMAIL, JIRA_API_TOKEN))
-        resp.raise_for_status()
-        data = resp.json()
-        issues.extend(data["issues"])
-        if start_at + 50 >= data["total"]:
-            break
-        start_at += 50
-    return issues
+AUTH = (JIRA_EMAIL, JIRA_API_TOKEN)
 
 
 def get_team_members(issues):
@@ -51,29 +24,6 @@ def get_team_members(issues):
         if assignee and isinstance(assignee, dict):
             members.add(assignee.get("displayName", "Unknown"))
     return sorted(members)
-
-
-def achieved_points_and_time(issues):
-    points = 0
-    time_logged = 0
-    for issue in issues:
-        fields = issue["fields"]
-        status = fields.get("status", {}).get("name", "").lower()
-        if status in ("done", "closed", "resolved"):
-            story_points = fields.get(FIELD_STORY_POINTS)
-            if story_points not in (None, "?") and str(story_points).strip() != "":
-                try:
-                    points += float(story_points)
-                except Exception:
-                    pass
-            if fields.get("timetracking") and isinstance(fields["timetracking"], dict):
-                time_logged_val = fields["timetracking"].get("timeSpentSeconds")
-                if time_logged_val not in (None, "", "?"):
-                    try:
-                        time_logged += int(time_logged_val)
-                    except Exception:
-                        pass
-    return points, time_logged
 
 
 def prompt_availability(members):
@@ -102,7 +52,7 @@ def try_save_workbook(wb, excel_name):
 
 def main():
     print("Fetching last 10 completed sprints...")
-    sprints = get_sprints(state="closed", max_results=10)
+    sprints = get_recent_sprints(JIRA_URL, BOARD_ID, AUTH, state="closed", max_results=10)
     if not sprints:
         print("No completed sprints found.")
         return
@@ -112,8 +62,8 @@ def main():
     results = []
     all_members = set()
     for s in sprints:
-        issues = get_issues(s["id"])
-        pts, tlog = achieved_points_and_time(issues)
+        issues = get_sprint_issues(JIRA_URL, s["id"], AUTH)
+        pts, tlog = achieved_points_and_time(issues, FIELD_STORY_POINTS)
         members = get_team_members(issues)
         all_members.update(members)
         results.append({"sprint": s, "points": pts, "time": tlog, "members": members})

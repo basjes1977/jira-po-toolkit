@@ -52,7 +52,7 @@ This project was inspired by a script a colleague had created, but that solution
   - Handles file locking: prompts you to close the PowerPoint file if it is open before saving.
   - Output file name is sanitized to remove problematic characters.
   - Only issues of type 'story' or 'task' are included.
-  - Adds summary, upcoming, and "thanks" slides using the template.
+  - Adds summary, velocity (last 10 sprints with line chart), upcoming, and "thanks" slides using the template.
 - **Instructions:**
   - Ensure `sprint-template.pptx` is present in the script directory.
   - Output file is named after the sprint (e.g., `Sprint 42.pptx`).
@@ -80,6 +80,8 @@ This project was inspired by a script a colleague had created, but that solution
 - **Purpose:** Checks all Stories in 'Ready' state for missing acceptance criteria and for a valid label.
 - **Instructions:**
   - A story is only 'Ready' if it has acceptance criteria (markdown list) and a label from the PowerPoint generator's list.
+  - Run with `python jira_ready_sanity_check.py --fix-labels` to assign one or more labels interactively (comma-separated); when launched from the menu you'll be prompted automatically if any labels are missing.
+  - Stories lacking description, acceptance criteria, and a valid label trigger an early prompt so you can move them back to `To Refine` before spending time labeling.
 - [See detailed README](./jira_ready_sanity_check.md)
 
 ### 5. Show 'On Hold' Stories Overview (`jira_on_hold_overview.py`)

@@ -8,12 +8,17 @@ Checks all Stories in 'Ready' state for missing acceptance criteria and for a va
 python jira_ready_sanity_check.py
 ```
 
+### Optional Flags
+
+- `--fix-labels`: interactively assign one of the approved labels (comma-separated input is not needed here). When run via `jpt_menu.py` or without the flag, the script automatically prompts you to launch the helper if any 'Ready' stories lack a valid label.
+
 ## What it does
 
 - Fetches all Stories in 'Ready' state from the configured board.
 - Checks for:
   - Missing acceptance criteria (must be a markdown list in the custom field)
   - Missing valid label (from the PowerPoint generator's list)
+- If a story lacks description *and* acceptance criteria *and* a valid label, the script can transition it back to the `To Refine` state.
 - Prints a list with direct Jira links.
 
 ## Requirements
