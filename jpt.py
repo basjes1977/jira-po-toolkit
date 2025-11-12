@@ -24,7 +24,7 @@ import os
 import logging
 
 # Load Jira credentials from .jira_environment
-from jira_config import load_jira_env
+from jira_config import load_jira_env, get_ssl_verify
 from jira_metrics import build_velocity_history
 
 JIRA_ENV = load_jira_env()
@@ -33,6 +33,7 @@ JIRA_EMAIL = JIRA_ENV.get("JT_JIRA_USERNAME")
 JIRA_API_TOKEN = JIRA_ENV.get("JT_JIRA_PASSWORD")
 BOARD_ID = JIRA_ENV.get("JT_JIRA_BOARD")
 FIELD_STORY_POINTS = JIRA_ENV.get("JT_JIRA_FIELD_STORY_POINTS", "customfield_10024")
+SSL_VERIFY = get_ssl_verify()
 
 # Configure logging
 logger = logging.getLogger("jpt")
@@ -54,7 +55,7 @@ def jira_get(url, params=None, max_retries=4, backoff=1.0, timeout=15, **kwargs)
     for attempt in range(1, max_retries + 1):
         try:
             logger.debug("GET %s params=%s (attempt %d)", url, params, attempt)
-            resp = sess.get(url, params=params, auth=(JIRA_EMAIL, JIRA_API_TOKEN), timeout=timeout)
+            resp = sess.get(url, params=params, auth=(JIRA_EMAIL, JIRA_API_TOKEN), timeout=timeout, verify=SSL_VERIFY)
             # Treat 5xx as retryable
             if 500 <= resp.status_code < 600:
                 logger.warning("Server error %s for %s (attempt %d)", resp.status_code, url, attempt)
@@ -100,7 +101,7 @@ def jql_search(payload, max_retries=2):
             for try_payload in candidate_payloads:
                 try:
                     logger.debug("POST %s payload=%s (attempt %d)", endpoint, try_payload, attempt)
-                    resp = requests.Session().post(endpoint, json=try_payload, auth=(JIRA_EMAIL, JIRA_API_TOKEN), headers=headers, timeout=15)
+                    resp = requests.Session().post(endpoint, json=try_payload, auth=(JIRA_EMAIL, JIRA_API_TOKEN), headers=headers, timeout=15, verify=SSL_VERIFY)
                     text = None
                     try:
                         text = resp.text

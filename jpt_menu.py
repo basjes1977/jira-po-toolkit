@@ -1,6 +1,7 @@
 import subprocess
 import sys
 import os
+from pathlib import Path
 
 MENU = [
     ("Generate Sprint PowerPoint Presentation", "jpt.py"),
@@ -16,7 +17,54 @@ MENU = [
 def clear():
     os.system('cls' if os.name == 'nt' else 'clear')
 
+def prompt_zscaler_usage():
+    """Prompt user once about SSL configuration and set environment variable."""
+    clear()
+    print("SSL Configuration")
+    print("-" * 50)
+    print("\nHow should SSL certificates be verified?")
+    print()
+    print("  1. Use Zscaler certificate (for Zscaler proxy)")
+    print("  2. Use standard SSL verification (no proxy)")
+    print("  3. Disable SSL verification (not recommended, bypasses security)")
+    print()
+    print("If you get 'certificate verify failed' errors, you're likely behind")
+    print("Zscaler and should choose option 1.")
+    print()
+
+    while True:
+        response = input("Your choice (1/2/3): ").strip()
+        if response == '1':
+            # Check if Zscaler.pem exists
+            cert_path = Path(__file__).parent / "Zscaler.pem"
+            if cert_path.exists():
+                os.environ['JT_SSL_VERIFY'] = str(cert_path)
+                print(f"\n✓ Using Zscaler certificate: {cert_path}")
+            else:
+                print(f"\n⚠ Warning: Zscaler.pem not found at {cert_path}")
+                print("  You may encounter SSL errors. Consider option 3 to bypass.")
+                os.environ['JT_SSL_VERIFY'] = 'true'
+            break
+        elif response == '2':
+            os.environ['JT_SSL_VERIFY'] = 'true'
+            print("\n✓ Using standard SSL verification")
+            print("  (If you get SSL errors, try option 1 or 3)")
+            break
+        elif response == '3':
+            os.environ['JT_SSL_VERIFY'] = 'false'
+            print("\n⚠ SSL verification DISABLED")
+            print("  Warning: This bypasses certificate security checks!")
+            break
+        else:
+            print("Invalid input. Please enter '1', '2', or '3'.")
+
+    print("\nPress Enter to continue to main menu...")
+    input()
+
 def main():
+    # Prompt for Zscaler usage once at startup
+    prompt_zscaler_usage()
+
     # Explanations for each script
     EXPLANATIONS = {
         "jira_blocked_overview.py": (

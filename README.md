@@ -107,8 +107,12 @@ This project was inspired by a script a colleague had created, but that solution
 ## Troubleshooting
 
 - **SSL/Certificate Issues (e.g., Zscaler):**
-  - If you encounter SSL errors, set the environment variable `REQUESTS_CA_BUNDLE` to your Zscaler certificate file path.
-  - Example: `export REQUESTS_CA_BUNDLE=/path/to/zscaler.pem`
+  - When you run `jpt_menu.py`, you'll be prompted to choose SSL verification mode:
+    - **Option 1**: Use Zscaler certificate (if you're behind Zscaler proxy)
+    - **Option 2**: Use standard SSL verification (no proxy)
+    - **Option 3**: Disable SSL verification (bypasses security, use for testing only)
+  - If you get "certificate verify failed" errors with option 2, you're likely behind Zscaler and should use option 1
+  - This configuration is set once per session when you start the menu
 - **PowerPoint File Lock:**
   - If the script cannot save the presentation, close the PowerPoint file and press Enter when prompted.
 

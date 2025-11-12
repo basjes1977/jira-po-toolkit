@@ -1,7 +1,7 @@
 import argparse
 
 import requests
-from jira_config import load_jira_env
+from jira_config import load_jira_env, get_ssl_verify
 
 JIRA_ENV = load_jira_env()
 JIRA_URL = JIRA_ENV.get("JT_JIRA_URL", "https://equinixjira.atlassian.net/").rstrip("/")
@@ -9,6 +9,7 @@ JIRA_EMAIL = JIRA_ENV.get("JT_JIRA_USERNAME")
 JIRA_API_TOKEN = JIRA_ENV.get("JT_JIRA_PASSWORD")
 BOARD_ID = JIRA_ENV.get("JT_JIRA_BOARD")
 FIELD_ACCEPTANCE_CRITERIA = JIRA_ENV.get("JT_JIRA_FIELD_ACCEPTANCE_CRITERIA", "customfield_10140")
+SSL_VERIFY = get_ssl_verify()
 
 # --- Label order from jpt.py ---
 LABEL_ORDER = [
@@ -33,7 +34,7 @@ def get_ready_stories():
             "maxResults": 50,
             "fields": f"summary,description,issuetype,labels,{FIELD_ACCEPTANCE_CRITERIA}"
         }
-        resp = requests.get(url, params=params, auth=(JIRA_EMAIL, JIRA_API_TOKEN))
+        resp = requests.get(url, params=params, auth=(JIRA_EMAIL, JIRA_API_TOKEN), verify=SSL_VERIFY)
         resp.raise_for_status()
         data = resp.json()
         issues.extend(data["issues"])
@@ -115,7 +116,7 @@ def update_story_labels(issue_key, labels):
     url = f"{JIRA_URL}/rest/api/3/issue/{issue_key}"
     payload = {"fields": {"labels": sanitized}}
     headers = {"Content-Type": "application/json"}
-    resp = requests.put(url, json=payload, auth=(JIRA_EMAIL, JIRA_API_TOKEN), headers=headers)
+    resp = requests.put(url, json=payload, auth=(JIRA_EMAIL, JIRA_API_TOKEN), headers=headers, verify=SSL_VERIFY)
     resp.raise_for_status()
 
 def collect_missing_label_stories(issues):
@@ -186,7 +187,7 @@ def interactive_label_fix(stories):
 
 def transition_issue_to_refine(issue_key):
     transitions_url = f"{JIRA_URL}/rest/api/3/issue/{issue_key}/transitions"
-    resp = requests.get(transitions_url, auth=(JIRA_EMAIL, JIRA_API_TOKEN))
+    resp = requests.get(transitions_url, auth=(JIRA_EMAIL, JIRA_API_TOKEN), verify=SSL_VERIFY)
     resp.raise_for_status()
     data = resp.json()
     transitions = data.get("transitions", [])
@@ -205,7 +206,7 @@ def transition_issue_to_refine(issue_key):
     if not target:
         raise RuntimeError(f"No 'To Refine' transition available for {issue_key}")
     payload = {"transition": {"id": target}}
-    resp = requests.post(transitions_url, json=payload, auth=(JIRA_EMAIL, JIRA_API_TOKEN))
+    resp = requests.post(transitions_url, json=payload, auth=(JIRA_EMAIL, JIRA_API_TOKEN), verify=SSL_VERIFY)
     resp.raise_for_status()
 
 def prompt_move_to_refine(stories):

@@ -2,7 +2,7 @@ import argparse
 from collections import Counter, defaultdict
 
 import requests
-from jira_config import load_jira_env
+from jira_config import load_jira_env, get_ssl_verify
 
 JIRA_ENV = load_jira_env()
 JIRA_URL = JIRA_ENV.get("JT_JIRA_URL", "https://equinixjira.atlassian.net/").rstrip("/")
@@ -11,6 +11,7 @@ JIRA_API_TOKEN = JIRA_ENV.get("JT_JIRA_PASSWORD")
 BOARD_ID = JIRA_ENV.get("JT_JIRA_BOARD")
 FIELD_EPIC_LINK = JIRA_ENV.get("JT_JIRA_FIELD_EPIC_LINK", "customfield_10031")
 FIELD_ACCEPTANCE_CRITERIA = JIRA_ENV.get("JT_JIRA_FIELD_ACCEPTANCE_CRITERIA", "customfield_10140")
+SSL_VERIFY = get_ssl_verify()
 
 # --- Fetch all Epics and Stories in 'To Refine' state ---
 def get_to_refine_issues():
@@ -28,7 +29,7 @@ def get_to_refine_issues():
             "maxResults": 50,
             "fields": f"summary,description,issuetype,labels,{FIELD_EPIC_LINK},epic,acceptanceCriteria,{FIELD_ACCEPTANCE_CRITERIA},parent"
         }
-        resp = requests.get(url, params=params, auth=(JIRA_EMAIL, JIRA_API_TOKEN))
+        resp = requests.get(url, params=params, auth=(JIRA_EMAIL, JIRA_API_TOKEN), verify=SSL_VERIFY)
         resp.raise_for_status()
         data = resp.json()
         issues.extend(data["issues"])
@@ -129,7 +130,7 @@ def set_story_labels(issue_key, labels):
     url = f"{JIRA_URL}/rest/api/3/issue/{issue_key}"
     payload = {"fields": {"labels": unique_labels}}
     headers = {"Content-Type": "application/json"}
-    resp = requests.put(url, json=payload, auth=(JIRA_EMAIL, JIRA_API_TOKEN), headers=headers)
+    resp = requests.put(url, json=payload, auth=(JIRA_EMAIL, JIRA_API_TOKEN), headers=headers, verify=SSL_VERIFY)
     resp.raise_for_status()
 
 def collect_stories_missing_labels(grouped):

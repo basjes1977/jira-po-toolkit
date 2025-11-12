@@ -4,9 +4,10 @@ Shared helpers for Jira sprint metrics (used by velocity/forecast features).
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Sequence, Tuple, Union
 
 import requests
+from jira_config import get_ssl_verify
 
 
 def get_recent_sprints(
@@ -15,10 +16,13 @@ def get_recent_sprints(
     auth: Tuple[str, str],
     state: str = "closed",
     max_results: int = 10,
+    verify: Union[bool, str, None] = None,
 ) -> List[Dict]:
     """Return recent sprints for the board sorted descending by end date."""
+    if verify is None:
+        verify = get_ssl_verify()
     url = f"{jira_url}/rest/agile/1.0/board/{board_id}/sprint?state={state}"
-    resp = requests.get(url, auth=auth)
+    resp = requests.get(url, auth=auth, verify=verify)
     resp.raise_for_status()
     sprints = resp.json().get("values", [])
     sprints = [s for s in sprints if s.get("endDate")]
@@ -31,14 +35,17 @@ def get_sprint_issues(
     sprint_id: int,
     auth: Tuple[str, str],
     page_size: int = 50,
+    verify: Union[bool, str, None] = None,
 ) -> List[Dict]:
     """Return all issues in the given sprint."""
+    if verify is None:
+        verify = get_ssl_verify()
     url = f"{jira_url}/rest/agile/1.0/sprint/{sprint_id}/issue"
     issues: List[Dict] = []
     start_at = 0
     while True:
         params = {"startAt": start_at, "maxResults": page_size}
-        resp = requests.get(url, params=params, auth=auth)
+        resp = requests.get(url, params=params, auth=auth, verify=verify)
         resp.raise_for_status()
         data = resp.json()
         issues.extend(data["issues"])

@@ -1,12 +1,13 @@
 import requests
 
-from jira_config import load_jira_env
+from jira_config import load_jira_env, get_ssl_verify
 
 JIRA_ENV = load_jira_env()
 JIRA_URL = JIRA_ENV.get("JT_JIRA_URL", "https://equinixjira.atlassian.net/").rstrip("/")
 JIRA_EMAIL = JIRA_ENV.get("JT_JIRA_USERNAME")
 JIRA_API_TOKEN = JIRA_ENV.get("JT_JIRA_PASSWORD")
 BOARD_ID = JIRA_ENV.get("JT_JIRA_BOARD")
+SSL_VERIFY = get_ssl_verify()
 
 def get_blocked_stories():
     url = f"{JIRA_URL}/rest/agile/1.0/board/{BOARD_ID}/issue"
@@ -19,7 +20,7 @@ def get_blocked_stories():
             "maxResults": 50,
             "fields": "summary,labels,assignee,issuelinks"
         }
-        resp = requests.get(url, params=params, auth=(JIRA_EMAIL, JIRA_API_TOKEN))
+        resp = requests.get(url, params=params, auth=(JIRA_EMAIL, JIRA_API_TOKEN), verify=SSL_VERIFY)
         resp.raise_for_status()
         data = resp.json()
         issues.extend(data["issues"])
