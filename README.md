@@ -24,12 +24,6 @@ This project was inspired by a script a colleague had created, but that solution
 
 ---
 
-## Contributor Notes
-
-- Keep this README and `AGENTS.md` aligned whenever scripts, dependencies, or workflows change so new contributors always have an up-to-date quickstart plus deeper agent guidance.
-
----
-
 ## Getting Started
 
 1. **Clone the repository and install dependencies** (see [Setup](#setup)).
