@@ -13,18 +13,55 @@ FIELD_EPIC_LINK = JIRA_ENV.get("JT_JIRA_FIELD_EPIC_LINK", "customfield_10031")
 FIELD_ACCEPTANCE_CRITERIA = JIRA_ENV.get("JT_JIRA_FIELD_ACCEPTANCE_CRITERIA", "customfield_10140")
 SSL_VERIFY = get_ssl_verify()
 
+def get_board_filter_id():
+    """Return the board filter id so JQL matches board scope (backlog + sprints)."""
+    url = f"{JIRA_URL}/rest/agile/1.0/board/{BOARD_ID}/configuration"
+    try:
+        resp = requests.get(url, auth=(JIRA_EMAIL, JIRA_API_TOKEN), verify=SSL_VERIFY)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("filter", {}).get("id")
+    except requests.RequestException as err:
+        print(f"Warning: could not load board config for filter scoping: {err}")
+    return None
+
+def jira_search(jql, fields, start_at=0, max_results=50):
+    """Execute a JQL search using the preferred /search/jql endpoint with fallback."""
+    headers = {"Content-Type": "application/json"}
+    payloads = [
+        {"jql": jql, "fields": fields, "startAt": start_at, "maxResults": max_results},
+        {"jql": jql, "fields": fields},  # minimal pagination hints; Jira may ignore startAt/maxResults if unsupported
+        {"query": {"jql": jql, "startAt": start_at, "maxResults": max_results}, "fields": fields},
+    ]
+    endpoints = [
+        f"{JIRA_URL}/rest/api/3/search/jql",  # preferred for Jira Cloud
+        f"{JIRA_URL}/rest/api/3/search",      # fallback for older tenants
+    ]
+    last_error = None
+    for endpoint in endpoints:
+        for payload in payloads:
+            try:
+                resp = requests.post(endpoint, json=payload, auth=(JIRA_EMAIL, JIRA_API_TOKEN), headers=headers, verify=SSL_VERIFY)
+                if resp.status_code == 200:
+                    return resp.json()
+                last_error = f"{resp.status_code}: {resp.text}"
+                # 410 means deprecated endpoint; try next payload/endpoint
+                if resp.status_code == 410:
+                    continue
+            except requests.RequestException as err:
+                last_error = err
+                continue
+    raise RuntimeError(f"Jira search failed for '{jql}': {last_error}")
+
 # --- Fetch all Epics and Stories in 'To Refine' state ---
 def get_to_refine_issues():
-    # Only check issues on the configured board
-    # 1. Get all sprints for the board (to get board context)
-    # 2. Get all issues for the board (backlog + sprints)
-    # 3. Filter for Epics/Stories in 'To Refine'
-    url = f"{JIRA_URL}/rest/agile/1.0/board/{BOARD_ID}/issue"
     issues = []
+    # Stories via the agile board issue endpoint (fast for backlog+sprints)
+    url = f"{JIRA_URL}/rest/agile/1.0/board/{BOARD_ID}/issue"
     start_at = 0
     while True:
         params = {
-            "jql": "(issuetype = Epic OR issuetype = Story) AND status = 'To Refine'",
+            "jql": "issuetype = Story AND status = 'To Refine'",
             "startAt": start_at,
             "maxResults": 50,
             "fields": f"summary,description,issuetype,labels,{FIELD_EPIC_LINK},epic,acceptanceCriteria,{FIELD_ACCEPTANCE_CRITERIA},parent"
@@ -36,6 +73,31 @@ def get_to_refine_issues():
         if start_at + 50 >= data["total"]:
             break
         start_at += 50
+    # Epics via JQL search (Agile issue endpoint omits epics)
+    filter_id = get_board_filter_id()
+    epic_jql_parts = ["issuetype = Epic", "status = 'To Refine'"]
+    if filter_id:
+        epic_jql_parts.append(f"filter = {filter_id}")
+    epic_jql = " AND ".join(epic_jql_parts)
+    epic_fields = [
+        "summary",
+        "description",
+        "issuetype",
+        "labels",
+        FIELD_EPIC_LINK,
+        "acceptanceCriteria",
+        FIELD_ACCEPTANCE_CRITERIA,
+        "parent",
+    ]
+    start_at = 0
+    while True:
+        data = jira_search(epic_jql, epic_fields, start_at=start_at, max_results=50)
+        epic_batch = data.get("issues", [])
+        issues.extend(epic_batch)
+        total = data.get("total", 0)
+        if start_at + len(epic_batch) >= total:
+            break
+        start_at += len(epic_batch)
     return issues
 
 # --- Group and sort issues ---
@@ -143,6 +205,17 @@ def collect_stories_missing_labels(grouped):
                 missing.append((epic_key, story))
     return missing
 
+def collect_epics_missing_labels(grouped):
+    missing = []
+    for epic_key, group in grouped.items():
+        epic = group.get("epic")
+        if not epic:
+            continue
+        labels = [lbl for lbl in epic["fields"].get("labels", []) if lbl]
+        if not labels:
+            missing.append(epic)
+    return missing
+
 def interactive_label_fix(grouped, stories_missing_label=None):
     if stories_missing_label is None:
         stories_missing_label = collect_stories_missing_labels(grouped)
@@ -189,6 +262,36 @@ def interactive_label_fix(grouped, stories_missing_label=None):
         except Exception as exc:
             print(f"Unexpected error while updating {key}: {exc}")
 
+def interactive_epic_label_fix(epics_missing_label):
+    if not epics_missing_label:
+        print("\nAll epics already have labels.")
+        return
+    print(f"\nFound {len(epics_missing_label)} epics without labels. You can now add them.")
+    for epic in epics_missing_label:
+        key = epic["key"]
+        summary = epic["fields"].get("summary", "")
+        print(f"\nEpic {key}: {summary}")
+        while True:
+            user_input = input("Enter comma-separated labels (or type 'skip'): ").strip()
+            if user_input.lower() in ("skip", "s"):
+                chosen_labels = []
+                break
+            labels = [lbl.strip() for lbl in user_input.split(",") if lbl.strip()]
+            if labels:
+                chosen_labels = labels
+                break
+            print("Please enter at least one label or type 'skip'.")
+        if not chosen_labels:
+            print(f"Skipped {key}")
+            continue
+        try:
+            set_story_labels(key, chosen_labels)
+            print(f"Set labels {chosen_labels} on {key}")
+        except requests.HTTPError as err:
+            print(f"Failed to update {key}: {err}")
+        except Exception as exc:
+            print(f"Unexpected error while updating {key}: {exc}")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Check 'To Refine' Epics/Stories and optionally fix missing labels.")
     parser.add_argument("--fix-labels", action="store_true", help="Interactively add labels to stories missing them.")
@@ -199,10 +302,16 @@ if __name__ == "__main__":
     print_results(grouped)
 
     missing_label_stories = collect_stories_missing_labels(grouped)
+    missing_label_epics = collect_epics_missing_labels(grouped)
 
     if args.fix_labels:
         interactive_label_fix(grouped, missing_label_stories)
+        interactive_epic_label_fix(missing_label_epics)
     elif missing_label_stories:
         resp = input("\nOne or more stories are missing labels. Add them now? [y/N]: ").strip().lower()
         if resp in ("y", "yes"):
             interactive_label_fix(grouped, missing_label_stories)
+    if missing_label_epics:
+        resp = input("\nOne or more epics are missing labels. Add them now? [y/N]: ").strip().lower()
+        if resp in ("y", "yes"):
+            interactive_epic_label_fix(missing_label_epics)

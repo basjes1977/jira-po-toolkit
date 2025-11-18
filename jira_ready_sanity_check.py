@@ -23,7 +23,46 @@ LABEL_ORDER = [
 ]
 label_order_lower = [l.lower() for l in LABEL_ORDER]
 
-def get_ready_stories():
+def get_board_filter_id():
+    """Return the board filter id so JQL searches match board scope (backlog + sprints)."""
+    url = f"{JIRA_URL}/rest/agile/1.0/board/{BOARD_ID}/configuration"
+    try:
+        resp = requests.get(url, auth=(JIRA_EMAIL, JIRA_API_TOKEN), verify=SSL_VERIFY)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("filter", {}).get("id")
+    except requests.RequestException as err:
+        print(f"Warning: could not load board config for filter scoping: {err}")
+    return None
+
+def jira_search(jql, fields, start_at=0, max_results=50):
+    """Execute a JQL search using the preferred /search/jql endpoint with fallback shapes."""
+    headers = {"Content-Type": "application/json"}
+    payloads = [
+        {"jql": jql, "fields": fields, "startAt": start_at, "maxResults": max_results},
+        {"jql": jql, "fields": fields},  # some tenants reject pagination hints in the body
+        {"query": {"jql": jql, "startAt": start_at, "maxResults": max_results}, "fields": fields},
+    ]
+    endpoints = [
+        f"{JIRA_URL}/rest/api/3/search/jql",
+        f"{JIRA_URL}/rest/api/3/search",
+    ]
+    last_error = None
+    for endpoint in endpoints:
+        for payload in payloads:
+            try:
+                resp = requests.post(endpoint, json=payload, auth=(JIRA_EMAIL, JIRA_API_TOKEN), headers=headers, verify=SSL_VERIFY)
+                if resp.status_code == 200:
+                    return resp.json()
+                last_error = f"{resp.status_code}: {resp.text}"
+                if resp.status_code == 410:
+                    continue
+            except requests.RequestException as err:
+                last_error = err
+                continue
+    raise RuntimeError(f"Jira search failed for '{jql}': {last_error}")
+
+def get_ready_items():
     url = f"{JIRA_URL}/rest/agile/1.0/board/{BOARD_ID}/issue"
     issues = []
     start_at = 0
@@ -41,6 +80,22 @@ def get_ready_stories():
         if start_at + 50 >= data["total"]:
             break
         start_at += 50
+    # Epics are not returned by the Agile issue endpoint; fetch via JQL scoped to the board filter
+    filter_id = get_board_filter_id()
+    epic_jql_parts = ["issuetype = Epic", "status = 'Ready'"]
+    if filter_id:
+        epic_jql_parts.append(f"filter = {filter_id}")
+    epic_jql = " AND ".join(epic_jql_parts)
+    epic_fields = ["summary", "description", "issuetype", "labels", FIELD_ACCEPTANCE_CRITERIA]
+    start_at = 0
+    while True:
+        data = jira_search(epic_jql, epic_fields, start_at=start_at, max_results=50)
+        epics_batch = data.get("issues", [])
+        issues.extend(epics_batch)
+        total = data.get("total", 0)
+        if start_at + len(epics_batch) >= total:
+            break
+        start_at += len(epics_batch)
     return issues
 
 def has_acceptance_criteria(fields):
@@ -122,6 +177,9 @@ def update_story_labels(issue_key, labels):
 def collect_missing_label_stories(issues):
     return [issue for issue in issues if not has_valid_label(issue["fields"])]
 
+def collect_missing_label_epics(issues):
+    return [issue for issue in issues if issue["fields"]["issuetype"]["name"].lower() == "epic" and not has_valid_label(issue["fields"])]
+
 def collect_severely_invalid_stories(issues):
     return [issue for issue in issues if is_severely_invalid(issue["fields"])]
 
@@ -157,6 +215,66 @@ def interactive_label_fix(stories):
                     break
             if not user_input:
                 confirm_skip = input("No label entered. Skip this story? [Y/n]: ").strip().lower()
+                if confirm_skip in ("", "y", "yes"):
+                    chosen = None
+                    break
+                continue
+            if user_input.lower() in ("skip", "s"):
+                chosen = None
+                break
+            entered = []
+            for part in user_input.split(","):
+                canonical = normalize_label(part)
+                if canonical and canonical not in entered:
+                    entered.append(canonical)
+            if not entered:
+                print("Please enter at least one label (comma-separated).")
+                continue
+            chosen = entered
+            break
+        if not chosen:
+            print(f"Skipped {key}")
+            continue
+        try:
+            update_story_labels(key, chosen)
+            print(f"Set labels {chosen} on {key}")
+        except requests.HTTPError as err:
+            print(f"Failed to update {key}: {err}")
+        except Exception as exc:
+            print(f"Unexpected error while updating {key}: {exc}")
+
+def interactive_epic_label_fix(epics):
+    if not epics:
+        print("\nAll 'Ready' epics already have valid labels.")
+        return
+    print("\nValid label options (comma-separated input allowed):")
+    print(", ".join(LABEL_ORDER))
+    for issue in epics:
+        fields = issue["fields"]
+        key = issue["key"]
+        summary = fields.get("summary", "")
+        existing = [lbl for lbl in fields.get("labels", []) if lbl]
+        suggestion = existing if existing else None
+        print(f"\nEpic {key}: {summary}")
+        if existing:
+            print(f"Existing labels: {', '.join(existing)}")
+        while True:
+            prompt = "Enter one or more valid labels (comma-separated)"
+            if suggestion:
+                prompt += f" [default: {', '.join(suggestion)}]"
+            prompt += " (or type 'skip'): "
+            user_input = input(prompt).strip()
+            if not user_input and suggestion:
+                normalized = []
+                for lbl in suggestion:
+                    canonical = normalize_label(lbl)
+                    if canonical and canonical not in normalized:
+                        normalized.append(canonical)
+                if normalized:
+                    chosen = normalized
+                    break
+            if not user_input:
+                confirm_skip = input("No label entered. Skip this epic? [Y/n]: ").strip().lower()
                 if confirm_skip in ("", "y", "yes"):
                     chosen = None
                     break
@@ -241,24 +359,31 @@ def print_results(issues):
             missing.append("No Valid Label")
         if missing:
             url = f"{JIRA_URL}/browse/{issue['key']}"
-            print(f"STORY: {issue['key']}: {fields.get('summary','')} [ {'; '.join(missing)} ]\n  {url}")
+            itype = fields.get("issuetype", {}).get("name", "Story").upper()
+            print(f"{itype}: {issue['key']}: {fields.get('summary','')} [ {'; '.join(missing)} ]\n  {url}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Check 'Ready' stories for missing acceptance criteria and valid labels.")
     parser.add_argument("--fix-labels", action="store_true", help="Interactively add a valid label to stories that are missing one.")
     args = parser.parse_args()
 
-    issues = get_ready_stories()
+    issues = get_ready_items()
     print_results(issues)
-    severe_stories = collect_severely_invalid_stories(issues)
+    severe_stories = collect_severely_invalid_stories([i for i in issues if i["fields"]["issuetype"]["name"].lower() == "story"])
     prompt_move_to_refine(severe_stories)
     skip_keys = {issue["key"] for issue in severe_stories}
     filtered_issues = [issue for issue in issues if issue["key"] not in skip_keys]
     missing_label_stories = collect_missing_label_stories(filtered_issues)
+    missing_label_epics = collect_missing_label_epics(filtered_issues)
     if args.fix_labels:
         interactive_label_fix(missing_label_stories)
+        interactive_epic_label_fix(missing_label_epics)
     elif missing_label_stories:
         resp = input("\nOne or more 'Ready' stories are missing a valid label. Add them now? [y/N]: ").strip().lower()
         if resp in ("y", "yes"):
             interactive_label_fix(missing_label_stories)
+    if missing_label_epics:
+        resp = input("\nOne or more 'Ready' epics are missing a valid label. Add them now? [y/N]: ").strip().lower()
+        if resp in ("y", "yes"):
+            interactive_epic_label_fix(missing_label_epics)
     prompt_move_to_refine(severe_stories)
