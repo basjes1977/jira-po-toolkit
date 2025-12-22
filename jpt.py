@@ -11,7 +11,7 @@ Split: presentation logic moved to jpt_presentation.py
 
 def get_upcoming_sprint_id():
     url = f"{JIRA_URL}/rest/agile/1.0/board/{BOARD_ID}/sprint?state=future"
-    resp = requests.get(url, auth=(JIRA_EMAIL, JIRA_API_TOKEN))
+    resp = _JIRA_SESSION.get(url, timeout=15)
     resp.raise_for_status()
     sprints = resp.json().get("values", [])
     if not sprints:
@@ -24,8 +24,9 @@ import os
 import logging
 
 # Load Jira credentials from .jira_environment
-from jira_config import load_jira_env, get_ssl_verify
+from jira_config import load_jira_env, get_ssl_verify, get_jira_session
 from jira_metrics import build_velocity_history
+from datetime import datetime
 
 JIRA_ENV = load_jira_env()
 JIRA_URL = JIRA_ENV.get("JT_JIRA_URL", "https://equinixjira.atlassian.net/").rstrip("/")
@@ -34,6 +35,9 @@ JIRA_API_TOKEN = JIRA_ENV.get("JT_JIRA_PASSWORD")
 BOARD_ID = JIRA_ENV.get("JT_JIRA_BOARD")
 FIELD_STORY_POINTS = JIRA_ENV.get("JT_JIRA_FIELD_STORY_POINTS", "customfield_10024")
 SSL_VERIFY = get_ssl_verify()
+
+# Shared session for all Jira API calls (with retry logic, auth, SSL)
+_JIRA_SESSION = get_jira_session()
 
 # Configure logging
 logger = logging.getLogger("jpt")
@@ -45,40 +49,31 @@ else:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     logger.setLevel(logging.INFO)
 
-# HTTP helper that retries on transient server/network errors.
+# DEPRECATED: Use _JIRA_SESSION.get() instead
 def jira_get(url, params=None, max_retries=4, backoff=1.0, timeout=15, **kwargs):
-    """GET with retries for Jira endpoints. Returns requests.Response or raises.
+    """DEPRECATED: Use get_jira_session().get() or _JIRA_SESSION.get() instead.
 
-    Accepts arbitrary kwargs but will always use basic auth from env.
+    This function is kept temporarily for backward compatibility.
+    Will be removed in a future version.
+
+    The shared session (_JIRA_SESSION) now handles retry logic automatically.
     """
-    sess = requests.Session()
-    for attempt in range(1, max_retries + 1):
-        try:
-            logger.debug("GET %s params=%s (attempt %d)", url, params, attempt)
-            resp = sess.get(url, params=params, auth=(JIRA_EMAIL, JIRA_API_TOKEN), timeout=timeout, verify=SSL_VERIFY)
-            # Treat 5xx as retryable
-            if 500 <= resp.status_code < 600:
-                logger.warning("Server error %s for %s (attempt %d)", resp.status_code, url, attempt)
-                if attempt == max_retries:
-                    resp.raise_for_status()
-                time.sleep(backoff * attempt)
-                continue
-            return resp
-        except requests.exceptions.RequestException as e:
-            logger.warning("Request error for %s: %s (attempt %d)", url, e, attempt)
-            if attempt == max_retries:
-                raise
-            time.sleep(backoff * attempt)
-    raise RuntimeError("Failed to GET %s after retries" % url)
-
-# Monkey-patch requests.get to use jira_get so existing calls use retries.
-requests.get = jira_get
+    import warnings
+    warnings.warn(
+        "jira_get() is deprecated. Use get_jira_session().get() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    # Delegate to shared session
+    return _JIRA_SESSION.get(url, params=params, timeout=timeout, **kwargs)
 
 
 def jql_search(payload, max_retries=2):
     """Run a JQL search using the newer API. Try /rest/api/3/search/jql then fallback to /rest/api/3/search.
 
     Returns the parsed JSON on success, or None on failure.
+
+    Note: Now uses shared session with automatic retry logic.
     """
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     endpoints = [
@@ -101,7 +96,7 @@ def jql_search(payload, max_retries=2):
             for try_payload in candidate_payloads:
                 try:
                     logger.debug("POST %s payload=%s (attempt %d)", endpoint, try_payload, attempt)
-                    resp = requests.Session().post(endpoint, json=try_payload, auth=(JIRA_EMAIL, JIRA_API_TOKEN), headers=headers, timeout=15, verify=SSL_VERIFY)
+                    resp = _JIRA_SESSION.post(endpoint, json=try_payload, headers=headers, timeout=15)
                     text = None
                     try:
                         text = resp.text
@@ -131,24 +126,29 @@ def get_current_sprint_id():
     Get the ID of the current active sprint from Jira.
     """
     url = f"{JIRA_URL}/rest/agile/1.0/board/{BOARD_ID}/sprint?state=active"
-    resp = requests.get(url, auth=(JIRA_EMAIL, JIRA_API_TOKEN))
+    resp = _JIRA_SESSION.get(url, timeout=15)
     resp.raise_for_status()
     sprints = resp.json().get("values", [])
     if not sprints:
         raise Exception("No active sprint found.")
     return sprints[0]["id"]
 
-def get_issues(sprint_id):
+def get_issues(sprint_id, expand_changelog=False):
     """
     Fetch all issues for a given sprint ID from Jira.
     Returns a list of issue dicts.
+
+    If expand_changelog is True, includes changelog data for each issue
+    (needed for detecting when issues were added to the sprint).
     """
     url = f"{JIRA_URL}/rest/agile/1.0/sprint/{sprint_id}/issue"
     issues = []
     start_at = 0
     while True:
         params = {"startAt": start_at, "maxResults": 50}
-        resp = requests.get(url, params=params, auth=(JIRA_EMAIL, JIRA_API_TOKEN))
+        if expand_changelog:
+            params["expand"] = "changelog"
+        resp = _JIRA_SESSION.get(url, params=params, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         issues.extend(data["issues"])
@@ -162,7 +162,7 @@ def get_sprint_name(sprint_id):
     Fetch the name of a sprint given its ID.
     """
     url = f"{JIRA_URL}/rest/agile/1.0/sprint/{sprint_id}"
-    resp = requests.get(url, auth=(JIRA_EMAIL, JIRA_API_TOKEN))
+    resp = _JIRA_SESSION.get(url, timeout=15)
     resp.raise_for_status()
     data = resp.json()
     return data.get("name", f"Sprint_{sprint_id}")
@@ -173,7 +173,7 @@ def get_sprint_dates(sprint_id):
     Returns (start_date, end_date) as strings (YYYY-MM-DD) or (None, None) if not available.
     """
     url = f"{JIRA_URL}/rest/agile/1.0/sprint/{sprint_id}"
-    resp = requests.get(url, auth=(JIRA_EMAIL, JIRA_API_TOKEN))
+    resp = _JIRA_SESSION.get(url, timeout=15)
     resp.raise_for_status()
     data = resp.json()
     start = data.get("startDate")
@@ -186,10 +186,138 @@ def get_sprint_dates(sprint_id):
     return (fmt(start), fmt(end))
 
 
+def get_sprint_start_datetime(sprint_id):
+    """
+    Fetch the start datetime of a sprint for comparison purposes.
+    Returns a datetime object or None if not available.
+    """
+    url = f"{JIRA_URL}/rest/agile/1.0/sprint/{sprint_id}"
+    resp = _JIRA_SESSION.get(url, timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
+    start = data.get("startDate")
+    if not start:
+        return None
+    # Parse ISO 8601 format (e.g., "2024-01-15T09:00:00.000Z" or "2024-01-15T09:00:00.000+0000")
+    try:
+        # Handle various ISO formats
+        if 'Z' in start:
+            return datetime.fromisoformat(start.replace('Z', '+00:00'))
+        elif '+' in start or start.count('-') > 2:
+            # Has timezone offset
+            return datetime.fromisoformat(start)
+        else:
+            return datetime.fromisoformat(start)
+    except Exception as e:
+        logger.debug("Failed to parse sprint start date '%s': %s", start, e)
+        return None
+
+
+def parse_issue_sprint_added_date(issue, sprint_id, sprint_name=None):
+    """
+    Parse an issue's changelog to find when it was added to the specified sprint.
+    Returns a datetime object or None if not found.
+
+    The function looks for changes to the 'Sprint' field where the sprint was added.
+    """
+    changelog = issue.get('changelog', {})
+    histories = changelog.get('histories', [])
+
+    if not histories:
+        return None
+
+    sprint_id_str = str(sprint_id)
+
+    for history in histories:
+        created = history.get('created')
+        items = history.get('items', [])
+
+        for item in items:
+            # Look for Sprint field changes
+            if item.get('field', '').lower() == 'sprint':
+                to_string = item.get('toString') or ''
+
+                # Check if this change added the issue to our sprint
+                # toString might be something like "Sprint 42" or contain the sprint name/id
+                if sprint_id_str in to_string or (sprint_name and sprint_name in to_string):
+                    if created:
+                        try:
+                            if 'Z' in created:
+                                return datetime.fromisoformat(created.replace('Z', '+00:00'))
+                            elif '+' in created or created.count('-') > 2:
+                                return datetime.fromisoformat(created)
+                            else:
+                                return datetime.fromisoformat(created)
+                        except Exception as e:
+                            logger.debug("Failed to parse changelog date '%s': %s", created, e)
+                            continue
+
+    return None
+
+
+def mark_mid_sprint_additions(issues, sprint_id, sprint_name=None):
+    """
+    Mark issues that were added after the sprint started.
+    Adds '_added_mid_sprint' key to each issue dict.
+
+    Returns the sprint start datetime used for comparison.
+    """
+    sprint_start = get_sprint_start_datetime(sprint_id)
+
+    if not sprint_start:
+        logger.debug("No sprint start date available, cannot mark mid-sprint additions")
+        for issue in issues:
+            issue['_added_mid_sprint'] = False
+        return None
+
+    for issue in issues:
+        added_date = parse_issue_sprint_added_date(issue, sprint_id, sprint_name)
+
+        if added_date:
+            # Make both datetimes offset-aware or offset-naive for comparison
+            # If one has timezone info and other doesn't, strip it
+            try:
+                if sprint_start.tzinfo is not None and added_date.tzinfo is None:
+                    added_date = added_date.replace(tzinfo=sprint_start.tzinfo)
+                elif sprint_start.tzinfo is None and added_date.tzinfo is not None:
+                    sprint_start_compare = sprint_start.replace(tzinfo=added_date.tzinfo)
+                    issue['_added_mid_sprint'] = added_date > sprint_start_compare
+                    continue
+
+                issue['_added_mid_sprint'] = added_date > sprint_start
+            except Exception as e:
+                logger.debug("Error comparing dates for %s: %s", issue.get('key'), e)
+                issue['_added_mid_sprint'] = False
+        else:
+            # No changelog entry found - check if issue was created after sprint start
+            created = issue.get('fields', {}).get('created')
+            if created:
+                try:
+                    if 'Z' in created:
+                        created_dt = datetime.fromisoformat(created.replace('Z', '+00:00'))
+                    else:
+                        created_dt = datetime.fromisoformat(created)
+
+                    # Handle timezone comparison
+                    if sprint_start.tzinfo is not None and created_dt.tzinfo is None:
+                        created_dt = created_dt.replace(tzinfo=sprint_start.tzinfo)
+                    elif sprint_start.tzinfo is None and created_dt.tzinfo is not None:
+                        sprint_start = sprint_start.replace(tzinfo=created_dt.tzinfo)
+
+                    issue['_added_mid_sprint'] = created_dt > sprint_start
+                except Exception as e:
+                    logger.debug("Error parsing created date for %s: %s", issue.get('key'), e)
+                    issue['_added_mid_sprint'] = False
+            else:
+                issue['_added_mid_sprint'] = False
+
+    return sprint_start
+
+
 def get_next_sprint_id():
     """Return the first future sprint id on the board, or None if none planned."""
     url = f"{JIRA_URL}/rest/agile/1.0/board/{BOARD_ID}/sprint?state=future"
-    resp = requests.get(url, auth=(JIRA_EMAIL, JIRA_API_TOKEN))
+    resp = _JIRA_SESSION.get(url, timeout=15)
     resp.raise_for_status()
     sprints = resp.json().get("values", [])
     if not sprints:
@@ -305,7 +433,7 @@ if __name__ == "__main__":
             url = f"{JIRA_URL}/rest/api/2/issue/{ik}"
             params = {"fields": "*all", "expand": "names,renderedFields"}
             try:
-                resp = requests.get(url, params=params)
+                resp = _JIRA_SESSION.get(url, params=params, timeout=15)
                 resp.raise_for_status()
                 data = resp.json()
                 print(json.dumps(data, indent=2, ensure_ascii=False))
@@ -341,7 +469,9 @@ if __name__ == "__main__":
         spinner_message[0] = "Fetching sprint dates..."
         sprint_start, sprint_end = get_sprint_dates(sprint_id)
         spinner_message[0] = "Fetching issues for current sprint..."
-        issues = get_issues(sprint_id)
+        issues = get_issues(sprint_id, expand_changelog=True)
+        spinner_message[0] = "Marking mid-sprint additions..."
+        mark_mid_sprint_additions(issues, sprint_id, sprint_name)
         spinner_message[0] = "Grouping issues by label..."
         grouped = group_issues_by_label(issues, sprint_id=sprint_id)
         spinner_message[0] = "Creating PowerPoint presentation..."
@@ -544,7 +674,7 @@ if __name__ == "__main__":
                     for key in chunk:
                         try:
                             url2 = f"{JIRA_URL}/rest/api/2/issue/{key}"
-                            r2 = requests.get(url2, auth=(JIRA_EMAIL, JIRA_API_TOKEN))
+                            r2 = _JIRA_SESSION.get(url2, timeout=15)
                             if r2.status_code == 200:
                                     d2 = r2.json()
                                     logger.debug("Per-issue fetch for %s returned fields: %s", key, list(d2.get('fields', {}).keys()))
@@ -588,7 +718,7 @@ if __name__ == "__main__":
             for ek in list(missing_parents):
                 try:
                     url_issue = f"{JIRA_URL}/rest/api/2/issue/{ek}"
-                    r = requests.get(url_issue, params={"fields": "*all", "expand": "names,renderedFields"})
+                    r = _JIRA_SESSION.get(url_issue, params={"fields": "*all", "expand": "names,renderedFields"}, timeout=15)
                     if r.status_code == 200:
                         d = r.json()
                         logger.debug("Per-issue GET returned for %s fields: %s", ek, list(d.get('fields', {}).keys()))

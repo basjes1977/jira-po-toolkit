@@ -1,7 +1,7 @@
 import argparse
 
 import requests
-from jira_config import load_jira_env, get_ssl_verify
+from jira_config import load_jira_env, get_ssl_verify, get_jira_session
 
 JIRA_ENV = load_jira_env()
 JIRA_URL = JIRA_ENV.get("JT_JIRA_URL", "https://equinixjira.atlassian.net/").rstrip("/")
@@ -10,6 +10,9 @@ JIRA_API_TOKEN = JIRA_ENV.get("JT_JIRA_PASSWORD")
 BOARD_ID = JIRA_ENV.get("JT_JIRA_BOARD")
 FIELD_ACCEPTANCE_CRITERIA = JIRA_ENV.get("JT_JIRA_FIELD_ACCEPTANCE_CRITERIA", "customfield_10140")
 SSL_VERIFY = get_ssl_verify()
+
+# Shared session for all Jira API calls
+_JIRA_SESSION = get_jira_session()
 
 # --- Label order from jpt.py ---
 LABEL_ORDER = [
@@ -27,7 +30,7 @@ def get_board_filter_id():
     """Return the board filter id so JQL searches match board scope (backlog + sprints)."""
     url = f"{JIRA_URL}/rest/agile/1.0/board/{BOARD_ID}/configuration"
     try:
-        resp = requests.get(url, auth=(JIRA_EMAIL, JIRA_API_TOKEN), verify=SSL_VERIFY)
+        resp = _JIRA_SESSION.get(url, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         return data.get("filter", {}).get("id")
@@ -51,7 +54,7 @@ def jira_search(jql, fields, start_at=0, max_results=50):
     for endpoint in endpoints:
         for payload in payloads:
             try:
-                resp = requests.post(endpoint, json=payload, auth=(JIRA_EMAIL, JIRA_API_TOKEN), headers=headers, verify=SSL_VERIFY)
+                resp = _JIRA_SESSION.post(endpoint, json=payload, headers=headers, timeout=15)
                 if resp.status_code == 200:
                     return resp.json()
                 last_error = f"{resp.status_code}: {resp.text}"
@@ -171,7 +174,7 @@ def update_story_labels(issue_key, labels):
     url = f"{JIRA_URL}/rest/api/3/issue/{issue_key}"
     payload = {"fields": {"labels": sanitized}}
     headers = {"Content-Type": "application/json"}
-    resp = requests.put(url, json=payload, auth=(JIRA_EMAIL, JIRA_API_TOKEN), headers=headers, verify=SSL_VERIFY)
+    resp = _JIRA_SESSION.put(url, json=payload, headers=headers, timeout=15)
     resp.raise_for_status()
 
 def collect_missing_label_stories(issues):
@@ -305,7 +308,7 @@ def interactive_epic_label_fix(epics):
 
 def transition_issue_to_refine(issue_key):
     transitions_url = f"{JIRA_URL}/rest/api/3/issue/{issue_key}/transitions"
-    resp = requests.get(transitions_url, auth=(JIRA_EMAIL, JIRA_API_TOKEN), verify=SSL_VERIFY)
+    resp = _JIRA_SESSION.get(transitions_url, timeout=15)
     resp.raise_for_status()
     data = resp.json()
     transitions = data.get("transitions", [])
@@ -324,7 +327,7 @@ def transition_issue_to_refine(issue_key):
     if not target:
         raise RuntimeError(f"No 'To Refine' transition available for {issue_key}")
     payload = {"transition": {"id": target}}
-    resp = requests.post(transitions_url, json=payload, auth=(JIRA_EMAIL, JIRA_API_TOKEN), verify=SSL_VERIFY)
+    resp = _JIRA_SESSION.post(transitions_url, json=payload, timeout=15)
     resp.raise_for_status()
 
 def prompt_move_to_refine(stories):

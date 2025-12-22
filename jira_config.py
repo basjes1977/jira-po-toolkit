@@ -11,6 +11,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Optional, Union
 
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
+
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_ENV_PATH = BASE_DIR / ".jira_environment"
 
@@ -106,3 +110,57 @@ def get_ssl_verify() -> Union[bool, str]:
     print(f"Warning: SSL certificate path does not exist: {cert_path}")
     print("Falling back to standard SSL verification.")
     return True
+
+
+@lru_cache(maxsize=1)
+def get_jira_session() -> requests.Session:
+    """Return a configured requests.Session for Jira API calls.
+
+    Features:
+    - Automatic retry logic for 5xx errors, network failures, rate limits
+    - Pre-configured authentication from .jira_environment
+    - SSL verification based on get_ssl_verify()
+    - Connection pooling for performance (10 connections, 20 max)
+    - Exponential backoff: 1s, 2s, 4s, 8s (4 retries)
+
+    Returns:
+        Configured requests.Session instance (singleton per process)
+
+    Example:
+        >>> session = get_jira_session()
+        >>> resp = session.get(url, timeout=15)
+    """
+    session = requests.Session()
+
+    # Configure retry logic with urllib3
+    retry_strategy = Retry(
+        total=4,                      # Max retry attempts (matches current jira_get)
+        backoff_factor=1.0,           # Exponential: 1s, 2s, 4s, 8s
+        status_forcelist=[500, 502, 503, 504, 429],  # Server errors + rate limit
+        allowed_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+        raise_on_status=False,        # Let caller handle HTTP errors
+    )
+
+    adapter = HTTPAdapter(
+        max_retries=retry_strategy,
+        pool_connections=10,    # Number of connection pools
+        pool_maxsize=20         # Connections per pool
+    )
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+
+    # Configure authentication
+    env = load_jira_env()
+    username = env.get("JT_JIRA_USERNAME")
+    api_token = env.get("JT_JIRA_PASSWORD")
+    if username and api_token:
+        session.auth = (username, api_token)
+
+    # Configure SSL verification
+    session.verify = get_ssl_verify()
+
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.debug("Initialized Jira session with retry logic and connection pooling")
+
+    return session

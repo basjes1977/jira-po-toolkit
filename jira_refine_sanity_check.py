@@ -2,7 +2,7 @@ import argparse
 from collections import Counter, defaultdict
 
 import requests
-from jira_config import load_jira_env, get_ssl_verify
+from jira_config import load_jira_env, get_ssl_verify, get_jira_session
 
 JIRA_ENV = load_jira_env()
 JIRA_URL = JIRA_ENV.get("JT_JIRA_URL", "https://equinixjira.atlassian.net/").rstrip("/")
@@ -13,11 +13,14 @@ FIELD_EPIC_LINK = JIRA_ENV.get("JT_JIRA_FIELD_EPIC_LINK", "customfield_10031")
 FIELD_ACCEPTANCE_CRITERIA = JIRA_ENV.get("JT_JIRA_FIELD_ACCEPTANCE_CRITERIA", "customfield_10140")
 SSL_VERIFY = get_ssl_verify()
 
+# Shared session for all Jira API calls
+_JIRA_SESSION = get_jira_session()
+
 def get_board_filter_id():
     """Return the board filter id so JQL matches board scope (backlog + sprints)."""
     url = f"{JIRA_URL}/rest/agile/1.0/board/{BOARD_ID}/configuration"
     try:
-        resp = requests.get(url, auth=(JIRA_EMAIL, JIRA_API_TOKEN), verify=SSL_VERIFY)
+        resp = _JIRA_SESSION.get(url, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         return data.get("filter", {}).get("id")
@@ -41,7 +44,7 @@ def jira_search(jql, fields, start_at=0, max_results=50):
     for endpoint in endpoints:
         for payload in payloads:
             try:
-                resp = requests.post(endpoint, json=payload, auth=(JIRA_EMAIL, JIRA_API_TOKEN), headers=headers, verify=SSL_VERIFY)
+                resp = _JIRA_SESSION.post(endpoint, json=payload, headers=headers, timeout=15)
                 if resp.status_code == 200:
                     return resp.json()
                 last_error = f"{resp.status_code}: {resp.text}"
@@ -66,7 +69,7 @@ def get_to_refine_issues():
             "maxResults": 50,
             "fields": f"summary,description,issuetype,labels,{FIELD_EPIC_LINK},epic,acceptanceCriteria,{FIELD_ACCEPTANCE_CRITERIA},parent"
         }
-        resp = requests.get(url, params=params, auth=(JIRA_EMAIL, JIRA_API_TOKEN), verify=SSL_VERIFY)
+        resp = _JIRA_SESSION.get(url, params=params, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         issues.extend(data["issues"])
@@ -192,7 +195,7 @@ def set_story_labels(issue_key, labels):
     url = f"{JIRA_URL}/rest/api/3/issue/{issue_key}"
     payload = {"fields": {"labels": unique_labels}}
     headers = {"Content-Type": "application/json"}
-    resp = requests.put(url, json=payload, auth=(JIRA_EMAIL, JIRA_API_TOKEN), headers=headers, verify=SSL_VERIFY)
+    resp = _JIRA_SESSION.put(url, json=payload, headers=headers, timeout=15)
     resp.raise_for_status()
 
 def collect_stories_missing_labels(grouped):

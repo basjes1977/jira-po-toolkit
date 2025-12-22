@@ -116,7 +116,9 @@ def create_presentation(
             display_name = ""
             if assignee and isinstance(assignee, dict):
                 display_name = assignee.get("displayName", "")
-            issue_text = f"{key}: {summary}"
+            # Check if issue was added mid-sprint
+            mid_sprint_marker = "➕ " if issue.get("_added_mid_sprint") else ""
+            issue_text = f"{mid_sprint_marker}{key}: {summary}"
             if display_name:
                 issue_text += f" {display_name}"
             if status_name:
@@ -248,8 +250,10 @@ def create_presentation(
                         key = issue.get("key")
                         summary = truncate(f.get("summary", ""), 120)
                         mark = "✔️" if done else "—"
+                        # Check if issue was added mid-sprint
+                        mid_sprint_marker = " ➕" if issue.get("_added_mid_sprint") else ""
                         s = tf.add_paragraph()
-                        s.text = f"{mark} {key}: {summary} [{status}]"
+                        s.text = f"{mark}{mid_sprint_marker} {key}: {summary} [{status}]"
                         s.level = 1
                         s.font.size = Pt(11)
                     prog = tf.add_paragraph()

@@ -17,7 +17,7 @@ Jira API Reference: https://developer.atlassian.com/cloud/jira/platform/rest/v3/
 
 import requests
 
-from jira_config import load_jira_env, get_ssl_verify
+from jira_config import load_jira_env, get_ssl_verify, get_jira_session
 
 JIRA_ENV = load_jira_env()
 JIRA_URL = JIRA_ENV.get("JT_JIRA_URL", "https://equinixjira.atlassian.net/").rstrip("/")
@@ -25,6 +25,9 @@ JIRA_EMAIL = JIRA_ENV.get("JT_JIRA_USERNAME")
 JIRA_API_TOKEN = JIRA_ENV.get("JT_JIRA_PASSWORD")
 BOARD_ID = JIRA_ENV.get("JT_JIRA_BOARD")
 SSL_VERIFY = get_ssl_verify()
+
+# Shared session for all Jira API calls
+_JIRA_SESSION = get_jira_session()
 
 def get_on_hold_stories():
     """Fetch all stories with status 'On hold' from the configured Jira board."""
@@ -38,7 +41,7 @@ def get_on_hold_stories():
             "maxResults": 50,
             "fields": "summary,labels,assignee"
         }
-        resp = requests.get(url, params=params, auth=(JIRA_EMAIL, JIRA_API_TOKEN), verify=SSL_VERIFY)
+        resp = _JIRA_SESSION.get(url, params=params, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         issues.extend(data["issues"])

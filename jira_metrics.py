@@ -7,22 +7,32 @@ from __future__ import annotations
 from typing import Dict, Iterable, List, Sequence, Tuple, Union
 
 import requests
-from jira_config import get_ssl_verify
+from jira_config import get_ssl_verify, get_jira_session
+
+# Shared session for all Jira API calls
+_JIRA_SESSION = get_jira_session()
 
 
 def get_recent_sprints(
     jira_url: str,
     board_id: str,
-    auth: Tuple[str, str],
+    auth: Tuple[str, str] = None,  # Deprecated, kept for compatibility
     state: str = "closed",
     max_results: int = 10,
-    verify: Union[bool, str, None] = None,
+    verify: Union[bool, str, None] = None,  # Deprecated, kept for compatibility
+    session: requests.Session = None,  # New parameter
 ) -> List[Dict]:
-    """Return recent sprints for the board sorted descending by end date."""
-    if verify is None:
-        verify = get_ssl_verify()
+    """Return recent sprints for the board sorted descending by end date.
+
+    Args:
+        auth: DEPRECATED - auth now comes from session
+        verify: DEPRECATED - SSL config now comes from session
+        session: Optional session to use (defaults to shared _JIRA_SESSION)
+    """
+    if session is None:
+        session = _JIRA_SESSION
     url = f"{jira_url}/rest/agile/1.0/board/{board_id}/sprint?state={state}"
-    resp = requests.get(url, auth=auth, verify=verify)
+    resp = session.get(url, timeout=15)
     resp.raise_for_status()
     sprints = resp.json().get("values", [])
     sprints = [s for s in sprints if s.get("endDate")]
@@ -33,19 +43,26 @@ def get_recent_sprints(
 def get_sprint_issues(
     jira_url: str,
     sprint_id: int,
-    auth: Tuple[str, str],
+    auth: Tuple[str, str] = None,  # Deprecated
     page_size: int = 50,
-    verify: Union[bool, str, None] = None,
+    verify: Union[bool, str, None] = None,  # Deprecated
+    session: requests.Session = None,  # New
 ) -> List[Dict]:
-    """Return all issues in the given sprint."""
-    if verify is None:
-        verify = get_ssl_verify()
+    """Return all issues in the given sprint.
+
+    Args:
+        auth: DEPRECATED - auth now comes from session
+        verify: DEPRECATED - SSL config now comes from session
+        session: Optional session to use (defaults to shared _JIRA_SESSION)
+    """
+    if session is None:
+        session = _JIRA_SESSION
     url = f"{jira_url}/rest/agile/1.0/sprint/{sprint_id}/issue"
     issues: List[Dict] = []
     start_at = 0
     while True:
         params = {"startAt": start_at, "maxResults": page_size}
-        resp = requests.get(url, params=params, auth=auth, verify=verify)
+        resp = session.get(url, params=params, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         issues.extend(data["issues"])
