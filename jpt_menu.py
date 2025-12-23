@@ -25,15 +25,14 @@ def prompt_zscaler_usage():
     print("\nHow should SSL certificates be verified?")
     print()
     print("  1. Use Zscaler certificate (for Zscaler proxy)")
-    print("  2. Use standard SSL verification (no proxy)")
-    print("  3. Disable SSL verification (not recommended, bypasses security)")
+    print("  2. Use standard SSL verification (default)")
     print()
     print("If you get 'certificate verify failed' errors, you're likely behind")
     print("Zscaler and should choose option 1.")
     print()
 
     while True:
-        response = input("Your choice (1/2/3): ").strip()
+        response = input("Your choice (1/2): ").strip()
         if response == '1':
             # Check if Zscaler.pem exists
             cert_path = Path(__file__).parent / "Zscaler.pem"
@@ -42,28 +41,49 @@ def prompt_zscaler_usage():
                 print(f"\n✓ Using Zscaler certificate: {cert_path}")
             else:
                 print(f"\n⚠ Warning: Zscaler.pem not found at {cert_path}")
-                print("  You may encounter SSL errors. Consider option 3 to bypass.")
+                print("  You may encounter SSL errors.")
+                print("  Falling back to standard SSL verification.")
                 os.environ['JT_SSL_VERIFY'] = 'true'
             break
         elif response == '2':
             os.environ['JT_SSL_VERIFY'] = 'true'
             print("\n✓ Using standard SSL verification")
-            print("  (If you get SSL errors, try option 1 or 3)")
-            break
-        elif response == '3':
-            os.environ['JT_SSL_VERIFY'] = 'false'
-            print("\n⚠ SSL verification DISABLED")
-            print("  Warning: This bypasses certificate security checks!")
             break
         else:
-            print("Invalid input. Please enter '1', '2', or '3'.")
+            print("Invalid input. Please enter '1' or '2'.")
 
     print("\nPress Enter to continue to main menu...")
     input()
 
+
+def check_legacy_ssl_config():
+    """Warn user if .jira_environment has deprecated SSL disable setting."""
+    from jira_config import load_jira_env
+    try:
+        env = load_jira_env()
+        ssl_setting = env.get('JT_SSL_VERIFY', '').strip().lower()
+        if ssl_setting in ('false', '0', 'no', 'off', 'disabled'):
+            print("\n" + "="*70)
+            print("WARNING: Deprecated SSL Configuration Detected")
+            print("="*70)
+            print("\nYour .jira_environment file contains:")
+            print("  JT_SSL_VERIFY=false")
+            print("\nThis setting is NO LONGER SUPPORTED for security reasons.")
+            print("\nPlease update .jira_environment to one of:")
+            print("  JT_SSL_VERIFY=true                    (standard SSL)")
+            print("  JT_SSL_VERIFY=/path/to/Zscaler.pem   (custom CA bundle)")
+            print("\nPress Enter to continue...")
+            input()
+    except Exception:
+        # If we can't load config, skip warning
+        pass
+
 def main():
     # Prompt for Zscaler usage once at startup
     prompt_zscaler_usage()
+
+    # Check for deprecated SSL configuration
+    check_legacy_ssl_config()
 
     # Explanations for each script
     EXPLANATIONS = {

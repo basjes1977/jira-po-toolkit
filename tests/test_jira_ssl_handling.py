@@ -16,15 +16,16 @@ def test_ssl_verify_true(mock_jira_env, monkeypatch):
     assert session.verify is True
 
 def test_ssl_verify_false(mock_jira_env, monkeypatch):
-    """Test SSL verification disabled (not recommended)."""
+    """Test that SSL verification cannot be disabled (security fix)."""
+    import pytest
     monkeypatch.setenv("JT_SSL_VERIFY", "false")
 
     import jira_config
     jira_config.get_jira_session.cache_clear()
 
-    assert get_ssl_verify() is False
-    session = get_jira_session()
-    assert session.verify is False
+    # SSL disable should now raise ValueError for security reasons
+    with pytest.raises(ValueError, match="SSL verification cannot be disabled"):
+        get_ssl_verify()
 
 def test_ssl_verify_custom_cert(mock_jira_env, tmp_path, monkeypatch):
     """Test SSL verification with custom certificate (e.g., Zscaler)."""

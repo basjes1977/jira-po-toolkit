@@ -55,8 +55,10 @@ def get_ssl_verify() -> Union[bool, str]:
 
     Returns:
         - True: Use standard SSL verification (default)
-        - False: Disable SSL verification (not recommended)
         - str: Path to custom CA bundle (e.g., Zscaler certificate)
+
+    Raises:
+        ValueError: If SSL verification is disabled (no longer supported for security)
 
     Checks in order:
         1. JT_SSL_VERIFY environment variable (set by jpt_menu.py) - HIGHEST PRIORITY
@@ -83,15 +85,18 @@ def get_ssl_verify() -> Union[bool, str]:
     # Parse the value
     ssl_verify_lower = ssl_verify.strip().lower()
 
-    # Check for boolean false
+    # Check for boolean false - NO LONGER SUPPORTED
     if ssl_verify_lower in ('false', '0', 'no', 'off', 'disabled'):
-        # Suppress InsecureRequestWarning when SSL verification is disabled
-        try:
-            import urllib3
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        except Exception:
-            pass
-        return False
+        raise ValueError(
+            "SSL verification cannot be disabled for security reasons.\n"
+            "\n"
+            "Options:\n"
+            "  1. Set JT_SSL_VERIFY=true for standard verification\n"
+            "  2. Set JT_SSL_VERIFY=/path/to/cert.pem for custom CA bundle (e.g., Zscaler)\n"
+            "  3. Remove JT_SSL_VERIFY to use default verification\n"
+            "\n"
+            "Update your .jira_environment file or environment variable accordingly."
+        )
 
     # Check for boolean true
     if ssl_verify_lower in ('true', '1', 'yes', 'on', 'enabled'):

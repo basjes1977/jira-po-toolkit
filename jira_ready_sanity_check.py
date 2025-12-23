@@ -2,6 +2,7 @@ import argparse
 
 import requests
 from jira_config import load_jira_env, get_ssl_verify, get_jira_session
+from jira_security import sanitize_jql_value
 
 JIRA_ENV = load_jira_env()
 JIRA_URL = JIRA_ENV.get("JT_JIRA_URL", "https://equinixjira.atlassian.net/").rstrip("/")
@@ -225,11 +226,23 @@ def interactive_label_fix(stories):
             if user_input.lower() in ("skip", "s"):
                 chosen = None
                 break
+            # Sanitize and normalize label input to prevent injection
             entered = []
+            invalid_labels = []
             for part in user_input.split(","):
-                canonical = normalize_label(part)
-                if canonical and canonical not in entered:
-                    entered.append(canonical)
+                try:
+                    # First sanitize to prevent injection
+                    sanitized = sanitize_jql_value(part.strip(), value_type='label')
+                    # Then normalize to known labels
+                    canonical = normalize_label(sanitized)
+                    if canonical and canonical not in entered:
+                        entered.append(canonical)
+                except ValueError as e:
+                    invalid_labels.append(part.strip())
+                    print(f"Invalid label '{part.strip()}': {e}")
+            if invalid_labels:
+                print("Please re-enter labels without invalid characters.")
+                continue
             if not entered:
                 print("Please enter at least one label (comma-separated).")
                 continue
@@ -285,11 +298,23 @@ def interactive_epic_label_fix(epics):
             if user_input.lower() in ("skip", "s"):
                 chosen = None
                 break
+            # Sanitize and normalize label input to prevent injection
             entered = []
+            invalid_labels = []
             for part in user_input.split(","):
-                canonical = normalize_label(part)
-                if canonical and canonical not in entered:
-                    entered.append(canonical)
+                try:
+                    # First sanitize to prevent injection
+                    sanitized = sanitize_jql_value(part.strip(), value_type='label')
+                    # Then normalize to known labels
+                    canonical = normalize_label(sanitized)
+                    if canonical and canonical not in entered:
+                        entered.append(canonical)
+                except ValueError as e:
+                    invalid_labels.append(part.strip())
+                    print(f"Invalid label '{part.strip()}': {e}")
+            if invalid_labels:
+                print("Please re-enter labels without invalid characters.")
+                continue
             if not entered:
                 print("Please enter at least one label (comma-separated).")
                 continue

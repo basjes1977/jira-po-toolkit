@@ -2,4 +2,5 @@ requests
 python-pptx
 dotenv
 openpyxl
+aiohttp>=3.9.0
 # pywin32 uncomment if you are on windows and want to use Outlook for sending e-mails

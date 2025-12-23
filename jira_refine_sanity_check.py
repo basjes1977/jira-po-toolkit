@@ -3,6 +3,7 @@ from collections import Counter, defaultdict
 
 import requests
 from jira_config import load_jira_env, get_ssl_verify, get_jira_session
+from jira_security import sanitize_jql_value
 
 JIRA_ENV = load_jira_env()
 JIRA_URL = JIRA_ENV.get("JT_JIRA_URL", "https://equinixjira.atlassian.net/").rstrip("/")
@@ -249,9 +250,23 @@ def interactive_label_fix(grouped, stories_missing_label=None):
             if user_input.lower() in ("skip", "s"):
                 chosen_labels = []
                 break
-            labels = [lbl.strip() for lbl in user_input.split(",") if lbl.strip()]
-            if labels:
-                chosen_labels = labels
+            # Sanitize label input to prevent injection
+            sanitized_labels = []
+            invalid_labels = []
+            for lbl in user_input.split(","):
+                cleaned = lbl.strip()
+                if cleaned:
+                    try:
+                        sanitized = sanitize_jql_value(cleaned, value_type='label')
+                        sanitized_labels.append(sanitized)
+                    except ValueError as e:
+                        invalid_labels.append(cleaned)
+                        print(f"Invalid label '{cleaned}': {e}")
+            if invalid_labels:
+                print(f"Please re-enter labels without invalid characters.")
+                continue
+            if sanitized_labels:
+                chosen_labels = sanitized_labels
                 break
             print("Please enter at least one label or type 'skip'.")
         if not chosen_labels:
@@ -279,9 +294,23 @@ def interactive_epic_label_fix(epics_missing_label):
             if user_input.lower() in ("skip", "s"):
                 chosen_labels = []
                 break
-            labels = [lbl.strip() for lbl in user_input.split(",") if lbl.strip()]
-            if labels:
-                chosen_labels = labels
+            # Sanitize label input to prevent injection
+            sanitized_labels = []
+            invalid_labels = []
+            for lbl in user_input.split(","):
+                cleaned = lbl.strip()
+                if cleaned:
+                    try:
+                        sanitized = sanitize_jql_value(cleaned, value_type='label')
+                        sanitized_labels.append(sanitized)
+                    except ValueError as e:
+                        invalid_labels.append(cleaned)
+                        print(f"Invalid label '{cleaned}': {e}")
+            if invalid_labels:
+                print(f"Please re-enter labels without invalid characters.")
+                continue
+            if sanitized_labels:
+                chosen_labels = sanitized_labels
                 break
             print("Please enter at least one label or type 'skip'.")
         if not chosen_labels:
