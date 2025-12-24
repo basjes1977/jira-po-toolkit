@@ -157,12 +157,18 @@ class SensitiveDataFilter(logging.Filter):
         if isinstance(record.msg, str):
             record.msg = self._redact(record.msg)
 
-        # Redact args (if any)
+        # Redact args (if any) - only redact strings, preserve other types (int, float, etc)
         if record.args:
             if isinstance(record.args, dict):
-                record.args = {k: self._redact(str(v)) for k, v in record.args.items()}
+                record.args = {
+                    k: self._redact(v) if isinstance(v, str) else v
+                    for k, v in record.args.items()
+                }
             elif isinstance(record.args, tuple):
-                record.args = tuple(self._redact(str(arg)) for arg in record.args)
+                record.args = tuple(
+                    self._redact(arg) if isinstance(arg, str) else arg
+                    for arg in record.args
+                )
 
         return True
 

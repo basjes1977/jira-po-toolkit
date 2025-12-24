@@ -170,6 +170,35 @@ class TestSensitiveDataFilter:
         assert "ATATT123xyz456" not in record.msg
         assert "[REDACTED-TOKEN]" in record.msg
 
+    def test_integer_args_preserved(self):
+        """Integer arguments should not be converted to strings (for %d formatting)."""
+        filter_obj = SensitiveDataFilter()
+
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=1,
+            msg="Fetching %d items with %s status",
+            args=(42, "active"),
+            exc_info=None
+        )
+
+        # Filter should return True
+        assert filter_obj.filter(record) is True
+
+        # Integer should remain an integer (not converted to string)
+        assert isinstance(record.args[0], int)
+        assert record.args[0] == 42
+
+        # String should still be redacted if needed
+        assert isinstance(record.args[1], str)
+        assert record.args[1] == "active"
+
+        # The formatted message should work with %d
+        formatted = record.msg % record.args
+        assert formatted == "Fetching 42 items with active status"
+
 
 class TestGetSafeJQLLogger:
     """Test logger creation with sensitive data filtering."""
