@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Setup Complete{% endblock %}
+
+{% block content %}
+<div class="welcome-section">
+    <h2>✓ Setup Complete!</h2>
+    <p>Your Jira environment has been configured successfully.</p>
+</div>
+
+<div class="status-box">
+    <div class="success">
+        <p><strong>Configuration saved to:</strong> <code>.jira_environment</code></p>
+        <p>The file has been secured with read/write permissions for the owner only.</p>
+    </div>
+</div>
+
+<div class="info-section">
+    <h3>🎉 You're Ready to Go!</h3>
+    <p>You can now use all features of the Jira Presentation Tool:</p>
+    <ul>
+        <li><strong>PowerPoint Generation:</strong> Create sprint review presentations</li>
+        <li><strong>Sprint Forecast:</strong> Generate capacity forecasts</li>
+        <li><strong>Sanity Checks:</strong> Validate story labels and acceptance criteria</li>
+        <li><strong>Overviews:</strong> View blocked and on-hold stories</li>
+    </ul>
+</div>
+
+<p style="margin-top: 2rem;">
+    <a href="/" class="button">Go to Home Page →</a>
+</p>
+
+<div class="info-section" style="margin-top: 2rem;">
+    <h3>ℹ️ Configuration Management</h3>
+    <ul>
+        <li>To modify settings later, edit the <code>.jira_environment</code> file in your project directory</li>
+        <li>Restart the Flask app after making changes</li>
+        <li>Keep your API token secure - never commit <code>.jira_environment</code> to version control</li>
+    </ul>
+</div>
+
+<script>
+// Reload the page after 2 seconds to reinitialize with new config
+setTimeout(function() {
+    window.location.href = '/';
+}, 3000);
+</script>
+{% endblock %}

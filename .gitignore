@@ -75,3 +75,6 @@ coverage.xml
 settings.json
 AGENTS.md
 CLAUDE.md
+
+# SQLite database
+*.db

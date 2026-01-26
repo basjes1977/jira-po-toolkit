@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}PowerPoint Generation{% endblock %}
+
+{% block content %}
+<h2>PowerPoint Generation</h2>
+
+<div class="status-box">
+    <p><strong>Status:</strong> <span id="status">{{ task.status }}</span></p>
+    <p><strong>Progress:</strong> <span id="progress">{{ task.progress or 'Waiting...' }}</span></p>
+
+    <div id="download-section" style="display: none;">
+        <div class="success">
+            <p>✓ Generation complete!</p>
+            <p><strong>Sprint:</strong> <span id="sprint-name"></span></p>
+            <p><strong>Issues:</strong> <span id="issue-count"></span></p>
+            <p><strong>Epics:</strong> <span id="epic-count"></span></p>
+        </div>
+        <p><a href="#" id="download-link" class="button">Download Presentation</a></p>
+    </div>
+
+    <div id="error-section" style="display: none;">
+        <div class="error">
+            <p>✗ Error occurred:</p>
+            <p id="error-message"></p>
+        </div>
+        <p><a href="/powerpoint" class="button button-secondary">← Try Again</a></p>
+    </div>
+
+    <div id="loading-section">
+        <p class="info">Please wait while the presentation is being generated. This may take 30-60 seconds...</p>
+    </div>
+</div>
+
+<p><a href="/powerpoint" class="button button-secondary">← Back to Form</a></p>
+
+<script>
+// Poll for status updates every 2 seconds
+const taskId = "{{ task.id }}";
+const poll = setInterval(() => {
+    fetch(`/powerpoint/api/status/${taskId}`)
+        .then(res => res.json())
+        .then(data => {
+            document.getElementById('status').textContent = data.status;
+            document.getElementById('progress').textContent = data.progress || 'Processing...';
+
+            if (data.status === 'completed') {
+                clearInterval(poll);
+                document.getElementById('loading-section').style.display = 'none';
+                document.getElementById('download-section').style.display = 'block';
+                document.getElementById('download-link').href = data.download_url;
+                document.getElementById('sprint-name').textContent = data.sprint_name || 'Unknown';
+                document.getElementById('issue-count').textContent = data.issue_count || '0';
+                document.getElementById('epic-count').textContent = data.epic_count || '0';
+            } else if (data.status === 'failed') {
+                clearInterval(poll);
+                document.getElementById('loading-section').style.display = 'none';
+                document.getElementById('error-section').style.display = 'block';
+                document.getElementById('error-message').textContent = data.error || 'Unknown error';
+            }
+        })
+        .catch(err => {
+            console.error('Status poll failed:', err);
+        });
+}, 2000);
+</script>
+{% endblock %}

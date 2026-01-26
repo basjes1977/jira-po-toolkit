@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jira Presentation Tool - {% block title %}Web UI{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav>
+        <h1>Jira Presentation Tool</h1>
+        <div class="nav-links">
+            <a href="/">Home</a>
+            <a href="/powerpoint">PowerPoint</a>
+            <a href="/forecast">Forecast</a>
+            <a href="/sanity-checks">Sanity Checks</a>
+            <a href="/overviews">Overviews</a>
+        </div>
+    </nav>
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer>
+        <p>Jira Presentation Tool - Local Flask Web UI</p>
+    </footer>
+</body>
+</html>

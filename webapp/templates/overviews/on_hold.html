@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}On-Hold Stories{% endblock %}
+
+{% block content %}
+<h2>On-Hold Stories</h2>
+
+<p class="info">Found {{ count }} on-hold {{ 'story' if count == 1 else 'stories' }}</p>
+
+{% if count == 0 %}
+    <div class="status-box">
+        <p class="success">No on-hold stories found.</p>
+    </div>
+{% else %}
+    <div class="story-list">
+        {% for story in stories %}
+        <div class="story-card">
+            <h3>
+                <a href="{{ story.url }}" target="_blank">{{ story.key }}</a>: {{ story.summary }}
+            </h3>
+            <p><strong>Assignee:</strong> {{ story.assignee }}</p>
+            <p><strong>Labels:</strong> {% if story.labels %}{{ story.labels|join(', ') }}{% else %}None{% endif %}</p>
+        </div>
+        {% endfor %}
+    </div>
+{% endif %}
+
+<p><a href="/overviews" class="button button-secondary">← Back to Overviews</a></p>
+
+<style>
+.story-list {
+    margin: 2rem 0;
+}
+
+.story-card {
+    background: white;
+    border: 1px solid #DFE1E6;
+    border-radius: 3px;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+}
+
+.story-card h3 {
+    margin-top: 0;
+    color: #172B4D;
+}
+
+.story-card h3 a {
+    color: #0052CC;
+    text-decoration: none;
+}
+
+.story-card h3 a:hover {
+    text-decoration: underline;
+}
+
+.story-card p {
+    margin: 0.5rem 0;
+    color: #5E6C84;
+}
+</style>
+{% endblock %}

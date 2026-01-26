@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Generate PowerPoint{% endblock %}
+
+{% block content %}
+<h2>Generate Sprint Review PowerPoint</h2>
+
+<p>Generate a PowerPoint presentation for a sprint with velocity data, epic breakdown, and story summaries.</p>
+
+{% if error %}
+<div class="error">
+    <p>{{ error }}</p>
+</div>
+{% endif %}
+
+<form method="POST">
+    <label for="sprint_id">Sprint ID:</label>
+    <input type="number"
+           id="sprint_id"
+           name="sprint_id"
+           placeholder="Leave blank for active sprint"
+           min="1">
+    <p class="info">Leave blank to generate presentation for the current active sprint.</p>
+
+    <button type="submit" class="button">Generate Presentation</button>
+</form>
+
+<div class="info-section">
+    <h3>ℹ️ What This Does</h3>
+    <ul>
+        <li>Fetches all stories and epics from the specified sprint</li>
+        <li>Groups issues by platform labels (NLMS, IEMS, ESMS, etc.)</li>
+        <li>Includes velocity history chart (last 10 sprints)</li>
+        <li>Shows epic summaries with initiative goals</li>
+        <li>Lists planned items for the next sprint</li>
+        <li>Generates a PowerPoint file saved to your current directory</li>
+    </ul>
+</div>
+{% endblock %}

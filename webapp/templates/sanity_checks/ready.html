@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}Ready - Sanity Check{% endblock %}
+
+{% block content %}
+<h2>'Ready' Stories - Sanity Check</h2>
+
+<p class="info">
+    Checked {{ total_stories }} stories.
+    {% if problem_count > 0 %}
+        Found <strong>{{ problem_count }}</strong> {{ 'issue' if problem_count == 1 else 'issues' }} with problems.
+    {% else %}
+        <strong>All stories look good!</strong>
+    {% endif %}
+</p>
+
+{% if problem_count == 0 %}
+    <div class="status-box">
+        <p class="success">✓ All 'Ready' stories have labels and acceptance criteria.</p>
+    </div>
+{% else %}
+    <div class="story-list">
+        {% for issue in issues_with_problems %}
+        <div class="story-card {% if 'No Label' in issue.missing and 'No Acceptance Criteria' in issue.missing %}story-card-severe{% endif %}">
+            <h3>
+                <a href="{{ issue.url }}" target="_blank">{{ issue.key }}</a>: {{ issue.summary }}
+            </h3>
+            <p><strong>Type:</strong> {{ issue.issuetype }}</p>
+            <p><strong>Current Labels:</strong> {% if issue.labels %}{{ issue.labels|join(', ') }}{% else %}<em>None</em>{% endif %}</p>
+            <p class="warning"><strong>Missing:</strong> {{ issue.missing|join(', ') }}</p>
+        </div>
+        {% endfor %}
+    </div>
+{% endif %}
+
+<p><a href="/sanity-checks" class="button button-secondary">← Back to Sanity Checks</a></p>
+
+<style>
+.story-list {
+    margin: 2rem 0;
+}
+
+.story-card {
+    background: white;
+    border: 1px solid #DFE1E6;
+    border-left: 3px solid #FF8B00;
+    border-radius: 3px;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+}
+
+.story-card-severe {
+    border-left-color: #DE350B;
+}
+
+.story-card h3 {
+    margin-top: 0;
+    color: #172B4D;
+}
+
+.story-card h3 a {
+    color: #0052CC;
+    text-decoration: none;
+}
+
+.story-card h3 a:hover {
+    text-decoration: underline;
+}
+
+.story-card p {
+    margin: 0.5rem 0;
+    color: #5E6C84;
+}
+</style>
+{% endblock %}

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block title %}Error{% endblock %}
+
+{% block content %}
+<h2>Error</h2>
+
+<div class="error">
+    <p>An error occurred while fetching data:</p>
+    <p><strong>{{ error }}</strong></p>
+</div>
+
+<p><a href="/overviews" class="button button-secondary">← Back to Overviews</a></p>
+{% endblock %}

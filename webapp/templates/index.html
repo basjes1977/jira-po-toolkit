@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Home{% endblock %}
+
+{% block content %}
+<div class="welcome-section">
+    <h2>Welcome to Jira Presentation Tool</h2>
+    <p>Choose an operation from the menu above or select one below.</p>
+</div>
+
+<div class="operations">
+    <div class="operation">
+        <h3>📊 PowerPoint Generation</h3>
+        <p>Generate sprint review presentation with velocity data, epic breakdown, and story summaries.</p>
+        <a href="/powerpoint" class="button">Generate Presentation →</a>
+    </div>
+
+    <div class="operation">
+        <h3>📈 Sprint Forecast</h3>
+        <p>Generate next sprint forecast based on team availability and historical velocity.</p>
+        <a href="/forecast" class="button">Generate Forecast →</a>
+    </div>
+
+    <div class="operation">
+        <h3>✅ Sanity Checks</h3>
+        <p>Check 'To Refine' and 'Ready' stories for missing labels and acceptance criteria.</p>
+        <a href="/sanity-checks" class="button">Run Sanity Checks →</a>
+    </div>
+
+    <div class="operation">
+        <h3>🚫 Blocked & On-Hold Stories</h3>
+        <p>View stories currently blocked or on hold, with reasons and owners.</p>
+        <a href="/overviews" class="button">View Overviews →</a>
+    </div>
+</div>
+
+<div class="info-section">
+    <h3>ℹ️ About This Tool</h3>
+    <ul>
+        <li><strong>Files are saved to your current working directory</strong> (same as CLI)</li>
+        <li>All operations use your existing <code>.jira_environment</code> configuration</li>
+        <li>Background tasks track progress in real-time</li>
+        <li>CLI scripts continue to work alongside this web UI</li>
+    </ul>
+</div>
+{% endblock %}

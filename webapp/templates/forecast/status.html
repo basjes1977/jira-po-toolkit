@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block title %}Forecast Generation{% endblock %}
+
+{% block content %}
+<h2>Sprint Forecast Generation</h2>
+
+<div class="status-box">
+    <p><strong>Status:</strong> <span id="status">{{ task.status }}</span></p>
+    <p><strong>Progress:</strong> <span id="progress">{{ task.progress or 'Waiting...' }}</span></p>
+
+    <div id="results-section" style="display: none;">
+        <div class="success">
+            <p>✓ Forecast generation complete!</p>
+            <p><strong>Sprints analyzed:</strong> <span id="sprint-count"></span></p>
+        </div>
+
+        <h3>Forecast Results</h3>
+        <div id="forecast-table"></div>
+
+        <p><a href="#" id="download-link" class="button">Download Excel File</a></p>
+    </div>
+
+    <div id="error-section" style="display: none;">
+        <div class="error">
+            <p>✗ Error occurred:</p>
+            <p id="error-message"></p>
+        </div>
+        <p><a href="/forecast" class="button button-secondary">← Try Again</a></p>
+    </div>
+
+    <div id="loading-section">
+        <p class="info">Please wait while the forecast is being generated. This may take 30-60 seconds...</p>
+    </div>
+</div>
+
+<p><a href="/forecast" class="button button-secondary">← Back to Form</a></p>
+
+<script>
+// Poll for status updates every 2 seconds
+const taskId = "{{ task.id }}";
+const poll = setInterval(() => {
+    fetch(`/forecast/api/status/${taskId}`)
+        .then(res => res.json())
+        .then(data => {
+            document.getElementById('status').textContent = data.status;
+            document.getElementById('progress').textContent = data.progress || 'Processing...';
+
+            if (data.status === 'completed') {
+                clearInterval(poll);
+                document.getElementById('loading-section').style.display = 'none';
+                document.getElementById('results-section').style.display = 'block';
+                document.getElementById('download-link').href = data.download_url;
+                document.getElementById('sprint-count').textContent = data.sprint_count || '0';
+
+                // Build forecast table
+                if (data.forecast_windows) {
+                    const fw = data.forecast_windows;
+                    const table = `
+                        <table class="forecast-table">
+                            <thead>
+                                <tr>
+                                    <th>Window</th>
+                                    <th>Avg Points</th>
+                                    <th>Forecast Points</th>
+                                    <th>Avg Time</th>
+                                    <th>Forecast Time</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Last 1</td>
+                                    <td>${fw.last_1.avg_points}</td>
+                                    <td><strong>${fw.last_1.forecast_points}</strong></td>
+                                    <td>${fw.last_1.avg_time_formatted}</td>
+                                    <td><strong>${fw.last_1.forecast_time_formatted}</strong></td>
+                                </tr>
+                                <tr>
+                                    <td>Last 3</td>
+                                    <td>${fw.last_3.avg_points}</td>
+                                    <td><strong>${fw.last_3.forecast_points}</strong></td>
+                                    <td>${fw.last_3.avg_time_formatted}</td>
+                                    <td><strong>${fw.last_3.forecast_time_formatted}</strong></td>
+                                </tr>
+                                <tr>
+                                    <td>Last 5</td>
+                                    <td>${fw.last_5.avg_points}</td>
+                                    <td><strong>${fw.last_5.forecast_points}</strong></td>
+                                    <td>${fw.last_5.avg_time_formatted}</td>
+                                    <td><strong>${fw.last_5.forecast_time_formatted}</strong></td>
+                                </tr>
+                                <tr>
+                                    <td>Last 10</td>
+                                    <td>${fw.last_10.avg_points}</td>
+                                    <td><strong>${fw.last_10.forecast_points}</strong></td>
+                                    <td>${fw.last_10.avg_time_formatted}</td>
+                                    <td><strong>${fw.last_10.forecast_time_formatted}</strong></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <p class="info">Team total available days (next sprint): ${fw.total_availability}</p>
+                    `;
+                    document.getElementById('forecast-table').innerHTML = table;
+                }
+            } else if (data.status === 'failed') {
+                clearInterval(poll);
+                document.getElementById('loading-section').style.display = 'none';
+                document.getElementById('error-section').style.display = 'block';
+                document.getElementById('error-message').textContent = data.error || 'Unknown error';
+            }
+        })
+        .catch(err => {
+            console.error('Status poll failed:', err);
+        });
+}, 2000);
+</script>
+
+<style>
+.forecast-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    background: white;
+}
+
+.forecast-table th,
+.forecast-table td {
+    padding: 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid #DFE1E6;
+}
+
+.forecast-table th {
+    background: #F4F5F7;
+    font-weight: 600;
+    color: #172B4D;
+}
+
+.forecast-table td {
+    color: #5E6C84;
+}
+
+.forecast-table tbody tr:hover {
+    background: #F4F5F7;
+}
+</style>
+{% endblock %}

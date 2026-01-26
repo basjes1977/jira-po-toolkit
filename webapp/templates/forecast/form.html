@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}Generate Forecast{% endblock %}
+
+{% block content %}
+<h2>Generate Sprint Forecast</h2>
+
+<p>Generate a sprint forecast based on historical data (last {{ sprint_count }} sprints) and team availability.</p>
+
+{% if error %}
+<div class="error">
+    <p>{{ error }}</p>
+</div>
+{% endif %}
+
+{% if members %}
+<form method="POST">
+    <h3>Team Availability (Next Sprint)</h3>
+    <p class="info">Enter the number of days each team member will be available in the coming sprint:</p>
+
+    <div class="team-availability">
+        {% for member in members %}
+        <div class="member-input">
+            <label for="member_{{ loop.index }}">{{ member }}:</label>
+            <input type="number"
+                   id="member_{{ loop.index }}"
+                   name="member_{{ member }}"
+                   step="0.5"
+                   min="0"
+                   max="20"
+                   value="10"
+                   required>
+        </div>
+        {% endfor %}
+    </div>
+
+    <button type="submit" class="button">Generate Forecast</button>
+</form>
+{% else %}
+<div class="warning">
+    <p>No team members found in recent sprints. Please ensure your Jira board has completed sprints with assigned stories.</p>
+</div>
+{% endif %}
+
+<div class="info-section">
+    <h3>ℹ️ What This Does</h3>
+    <ul>
+        <li>Analyzes the last 10 completed sprints</li>
+        <li>Calculates average story points and time logged per sprint</li>
+        <li>Scales forecast based on team availability (next sprint vs. historical average)</li>
+        <li>Provides forecast windows: Last 1, 3, 5, and 10 sprints</li>
+        <li>Generates an Excel file with sprint history and forecast charts</li>
+        <li>File saved to your current directory as <code>sprint_forecast_history.xlsx</code></li>
+    </ul>
+</div>
+
+<style>
+.team-availability {
+    background: white;
+    border: 1px solid #DFE1E6;
+    border-radius: 3px;
+    padding: 1.5rem;
+    margin: 1rem 0;
+}
+
+.member-input {
+    display: flex;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.member-input label {
+    flex: 1;
+    margin-bottom: 0;
+}
+
+.member-input input {
+    flex: 0 0 100px;
+    margin-bottom: 0;
+}
+</style>
+{% endblock %}

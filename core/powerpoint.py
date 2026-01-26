@@ -1,0 +1,859 @@
+"""
+Core PowerPoint generation logic for JiraPresentationTool.
+
+This module provides the business logic for generating sprint review presentations.
+It can be used by both the CLI and Flask web UI.
+"""
+
+import logging
+import sys
+import time
+import re
+from pathlib import Path
+from typing import Dict, List, Any, Optional, Callable
+from datetime import datetime
+
+# Import Jira configuration and utilities
+from jira_config import load_jira_env, get_jira_session, get_ssl_verify
+from jira_performance import get_cached_sprint_metadata, parse_iso8601_datetime
+from jira_security import sanitize_jql_value, sanitize_jql_list
+from jira_async import fetch_epics_sync
+from jira_metrics import build_velocity_history
+from jpt_presentation import create_presentation
+
+# Set up logging
+logger = logging.getLogger(__name__)
+
+# Load Jira environment at module level for performance
+JIRA_ENV = load_jira_env()
+_JIRA_SESSION = get_jira_session()
+JIRA_URL = JIRA_ENV.get("JT_JIRA_URL", "https://equinixjira.atlassian.net/").rstrip("/")
+BOARD_ID = JIRA_ENV.get("JT_JIRA_BOARD")
+JIRA_EMAIL = JIRA_ENV.get("JT_JIRA_USERNAME")
+JIRA_API_TOKEN = JIRA_ENV.get("JT_JIRA_PASSWORD")
+FIELD_STORY_POINTS = JIRA_ENV.get("JT_JIRA_FIELD_STORY_POINTS", "customfield_10024")
+SSL_VERIFY = get_ssl_verify()
+
+
+def jql_search(payload):
+    """
+    Try multiple JQL search endpoints/payload formats until one works.
+    Returns JSON response data or None on failure.
+    """
+    import requests
+
+    # Try multiple endpoints
+    endpoints = [
+        f"{JIRA_URL}/rest/api/3/search/jql",
+        f"{JIRA_URL}/rest/api/3/search"
+    ]
+
+    # Try different payload shapes because different Jira instances accept different formats
+    payloads_to_try = []
+
+    # Original payload
+    payloads_to_try.append(payload)
+
+    # Variant 1: Ensure jql is top-level
+    if 'jql' not in payload and 'query' in payload:
+        payloads_to_try.append({**payload, 'jql': payload['query']})
+
+    # Variant 2: Try with startAt/maxResults if missing
+    base = {**payload}
+    if 'startAt' not in base:
+        base['startAt'] = 0
+    if 'maxResults' not in base:
+        base['maxResults'] = 100
+    payloads_to_try.append(base)
+
+    headers = {"Content-Type": "application/json"}
+
+    for endpoint in endpoints:
+        for try_payload in payloads_to_try:
+            for attempt in range(1, 3):
+                try:
+                    logger.debug("POST %s payload=%s (attempt %d)", endpoint, try_payload, attempt)
+                    resp = _JIRA_SESSION.post(endpoint, json=try_payload, headers=headers, timeout=15)
+                    text = None
+                    try:
+                        text = resp.text
+                    except Exception:
+                        text = '<no-body>'
+                    logger.debug("Response %s %s", resp.status_code, (text[:200] + '...') if text and len(text) > 200 else text)
+                    if resp.status_code == 200:
+                        try:
+                            return resp.json()
+                        except Exception:
+                            return None
+                    # client error: try next payload shape immediately
+                    if 400 <= resp.status_code < 500:
+                        logger.debug("Client error %s from %s for payload %s: %s", resp.status_code, endpoint, try_payload, text)
+                        continue
+                    # server error: wait and retry payload/endpoint
+                    time.sleep(0.5 * attempt)
+                except requests.exceptions.RequestException as e:
+                    logger.warning("JQL search request exception to %s: %s", endpoint, e)
+                    time.sleep(0.5 * attempt)
+        logger.debug("Falling back from endpoint %s to next", endpoint)
+    logger.warning("JQL search failed for payload: %s", payload)
+    return None
+
+
+def get_current_sprint_id():
+    """
+    Get the ID of the current active sprint from Jira.
+    """
+    url = f"{JIRA_URL}/rest/agile/1.0/board/{BOARD_ID}/sprint?state=active"
+    resp = _JIRA_SESSION.get(url, timeout=15)
+    resp.raise_for_status()
+    sprints = resp.json().get("values", [])
+    if not sprints:
+        raise Exception("No active sprint found.")
+    return sprints[0]["id"]
+
+
+def get_issues(sprint_id, expand_changelog=False):
+    """
+    Fetch all issues for a given sprint ID from Jira.
+    Returns a list of issue dicts.
+
+    If expand_changelog is True, includes changelog data for each issue
+    (needed for detecting when issues were added to the sprint).
+    """
+    url = f"{JIRA_URL}/rest/agile/1.0/sprint/{sprint_id}/issue"
+    issues = []
+    start_at = 0
+    while True:
+        params = {"startAt": start_at, "maxResults": 50}
+        if expand_changelog:
+            params["expand"] = "changelog"
+        resp = _JIRA_SESSION.get(url, params=params, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        issues.extend(data["issues"])
+        if start_at + 50 >= data["total"]:
+            break
+        start_at += 50
+    return issues
+
+
+def get_sprint_start_datetime(sprint_id):
+    """
+    Fetch the start datetime of a sprint for comparison purposes.
+    Returns a datetime object or None if not available.
+
+    Uses cached sprint metadata to avoid duplicate API calls.
+    """
+    data = get_cached_sprint_metadata(JIRA_URL, sprint_id)
+    start = data.get("startDate")
+    if not start:
+        return None
+    # Use optimized cached date parser
+    return parse_iso8601_datetime(start)
+
+
+def parse_issue_sprint_added_date(issue, sprint_id, sprint_name=None):
+    """
+    Parse an issue's changelog to find when it was added to the specified sprint.
+    Returns a datetime object or None if not found.
+
+    The function looks for changes to the 'Sprint' field where the sprint was added.
+    """
+    changelog = issue.get('changelog', {})
+    histories = changelog.get('histories', [])
+
+    if not histories:
+        return None
+
+    sprint_id_str = str(sprint_id)
+
+    for history in histories:
+        created = history.get('created')
+        items = history.get('items', [])
+
+        for item in items:
+            # Look for Sprint field changes
+            if item.get('field', '').lower() == 'sprint':
+                to_string = item.get('toString') or ''
+
+                # Check if this change added the issue to our sprint
+                # toString might be something like "Sprint 42" or contain the sprint name/id
+                if sprint_id_str in to_string or (sprint_name and sprint_name in to_string):
+                    if created:
+                        # Use optimized cached date parser
+                        dt = parse_iso8601_datetime(created)
+                        if dt:
+                            return dt
+                        continue
+
+    return None
+
+
+def mark_mid_sprint_additions(issues, sprint_id, sprint_name=None):
+    """
+    Mark issues that were added after the sprint started.
+    Adds '_added_mid_sprint' key to each issue dict.
+
+    Returns the sprint start datetime used for comparison.
+    """
+    sprint_start = get_sprint_start_datetime(sprint_id)
+
+    if not sprint_start:
+        logger.debug("No sprint start date available, cannot mark mid-sprint additions")
+        for issue in issues:
+            issue['_added_mid_sprint'] = False
+        return None
+
+    for issue in issues:
+        added_date = parse_issue_sprint_added_date(issue, sprint_id, sprint_name)
+
+        if added_date:
+            # Make both datetimes offset-aware or offset-naive for comparison
+            # If one has timezone info and other doesn't, strip it
+            try:
+                if sprint_start.tzinfo is not None and added_date.tzinfo is None:
+                    added_date = added_date.replace(tzinfo=sprint_start.tzinfo)
+                elif sprint_start.tzinfo is None and added_date.tzinfo is not None:
+                    sprint_start_compare = sprint_start.replace(tzinfo=added_date.tzinfo)
+                    issue['_added_mid_sprint'] = added_date > sprint_start_compare
+                    continue
+
+                issue['_added_mid_sprint'] = added_date > sprint_start
+            except Exception as e:
+                logger.debug("Error comparing dates for %s: %s", issue.get('key'), e)
+                issue['_added_mid_sprint'] = False
+        else:
+            # No changelog entry found - check if issue was created after sprint start
+            created = issue.get('fields', {}).get('created')
+            if created:
+                # Use optimized cached date parser
+                created_dt = parse_iso8601_datetime(created)
+                if created_dt:
+                    # Handle timezone comparison
+                    if sprint_start.tzinfo is not None and created_dt.tzinfo is None:
+                        created_dt = created_dt.replace(tzinfo=sprint_start.tzinfo)
+                    elif sprint_start.tzinfo is None and created_dt.tzinfo is not None:
+                        sprint_start = sprint_start.replace(tzinfo=created_dt.tzinfo)
+
+                    issue['_added_mid_sprint'] = created_dt > sprint_start
+                else:
+                    issue['_added_mid_sprint'] = False
+            else:
+                issue['_added_mid_sprint'] = False
+
+    return sprint_start
+
+
+def get_next_sprint_id():
+    """Return the first future sprint id on the board, or None if none planned."""
+    url = f"{JIRA_URL}/rest/agile/1.0/board/{BOARD_ID}/sprint?state=future"
+    resp = _JIRA_SESSION.get(url, timeout=15)
+    resp.raise_for_status()
+    sprints = resp.json().get("values", [])
+    if not sprints:
+        return None
+    return sprints[0].get("id")
+
+
+def issue_in_sprint(issue, sprint_id):
+    """Return True if the given issue is part of the sprint with id sprint_id.
+
+    This function checks several common Jira fields that may contain sprint information:
+    - known custom fields like 'customfield_10007' (Sprint), 'sprint'
+    - string representations that include 'id=<sprint_id>'
+    It intentionally performs broad checks because Jira servers may store sprint info in different fields.
+    """
+    try:
+        fields = issue.get('fields', {})
+    except Exception:
+        return False
+    # Check a few likely field keys first
+    possible_keys = ['sprint', 'customfield_10007', 'customfield_10020', 'customfield_10100']
+    sid = str(sprint_id)
+    for key in possible_keys:
+        if key in fields:
+            val = fields.get(key)
+            if not val:
+                continue
+            # If it's a list of sprint descriptors
+            if isinstance(val, list):
+                for v in val:
+                    if isinstance(v, dict) and str(v.get('id')) == sid:
+                        return True
+                    if isinstance(v, str) and f"id={sid}" in v:
+                        return True
+            else:
+                if isinstance(val, dict) and str(val.get('id')) == sid:
+                    return True
+                if isinstance(val, str) and f"id={sid}" in val:
+                    return True
+    # Fallback: search any string field for 'id=<sprint_id>' (covers odd storage)
+    for k, v in fields.items():
+        if isinstance(v, str) and f"id={sid}" in v:
+            return True
+    return False
+
+
+def group_issues_by_label(issues, sprint_id=None):
+    """
+    Group issues by the first matching label from a predefined list (case-insensitive).
+    Only includes issues of type 'story' or 'task'.
+    Returns a dict: label -> list of issues, in the order of the label list, with 'Other' for unmatched.
+    """
+    LABEL_MAP = {
+        "nlms": "Dutch Platform(s)",
+        "iems": "Irish Platform(s)",
+        "esms": "Spanish Platform(s)",
+        "ukms": "UK Platform(s)",
+        "s&a-mpc": "MPC",
+        "s&a_mgt": "Management tasks",
+        "fims": "Finnish Platform(s)",
+    }
+    LABEL_ORDER = list(LABEL_MAP.keys())
+    grouped = {LABEL_MAP[label]: [] for label in LABEL_ORDER}
+    grouped["Other"] = []
+    CANCELLED_STATUSES = {"cancelled", "canceled", "removed", "declined"}
+    for issue in issues:
+        # If a sprint_id is provided, filter out issues that are not part of that sprint.
+        if sprint_id is not None and not issue_in_sprint(issue, sprint_id):
+            try:
+                logger.debug("Excluding %s: not in sprint %s", issue.get('key'), sprint_id)
+            except Exception:
+                pass
+            continue
+        fields = issue["fields"]
+        status_name = fields.get("status", {}).get("name", "").lower()
+        if status_name in CANCELLED_STATUSES:
+            try:
+                logger.debug("Excluding %s: status '%s'", issue.get('key'), status_name)
+            except Exception:
+                pass
+            continue
+        issuetype = fields["issuetype"]["name"].lower()
+        if issuetype not in ["story", "task"]:
+            continue
+        labels = [l.lower() for l in fields.get("labels", [])]
+        found = False
+        for label_key in LABEL_ORDER:
+            if label_key in labels:
+                grouped[LABEL_MAP[label_key]].append(issue)
+                found = True
+                break
+        if not found:
+            grouped["Other"].append(issue)
+    # Remove empty groups for cleaner output
+    return {k: v for k, v in grouped.items() if v}
+
+
+def generate_sprint_presentation(
+    sprint_id: Optional[int] = None,
+    output_dir: Optional[Path] = None,
+    progress_callback: Optional[Callable[[str], None]] = None
+) -> Dict[str, Any]:
+    """Generate PowerPoint presentation for sprint review.
+
+    Args:
+        sprint_id: Sprint ID to generate presentation for (None = active sprint)
+        output_dir: Output directory for the presentation file (None = current directory)
+        progress_callback: Optional callback(message: str) for progress updates
+
+    Returns:
+        dict: {
+            'success': bool,
+            'file_path': Path or None,
+            'sprint_name': str,
+            'sprint_id': int,
+            'issue_count': int,
+            'epic_count': int,
+            'error': str or None
+        }
+    """
+    def update_progress(msg: str):
+        """Helper to call progress_callback and log."""
+        if progress_callback:
+            progress_callback(msg)
+        logger.info(msg)
+
+    try:
+        # Set output directory
+        if output_dir is None:
+            output_dir = Path.cwd()
+        else:
+            output_dir = Path(output_dir)
+
+        # Get current/specified sprint
+        if sprint_id is None:
+            update_progress("Fetching current sprint ID...")
+            sprint_id = get_current_sprint_id()
+
+        # Fetch sprint metadata
+        update_progress("Fetching sprint metadata...")
+        sprint_data = get_cached_sprint_metadata(JIRA_URL, sprint_id)
+        sprint_name = sprint_data.get("name", f"Sprint_{sprint_id}")
+        sprint_start = sprint_data.get("startDate", "")[:10] if sprint_data.get("startDate") else None
+        sprint_end = sprint_data.get("endDate", "")[:10] if sprint_data.get("endDate") else None
+
+        # Fetch issues
+        update_progress("Fetching issues for current sprint...")
+        issues = get_issues(sprint_id, expand_changelog=True)
+
+        # Mark mid-sprint additions
+        update_progress("Marking mid-sprint additions...")
+        mark_mid_sprint_additions(issues, sprint_id, sprint_name)
+
+        # Group issues by label
+        update_progress("Grouping issues by label...")
+        grouped = group_issues_by_label(issues, sprint_id=sprint_id)
+
+        # Generate safe filename
+        update_progress("Creating PowerPoint presentation...")
+        safe_sprint_name = re.sub(r'[^\w\-.]', '_', sprint_name, flags=re.ASCII)
+        safe_sprint_name = re.sub(r'_+', '_', safe_sprint_name).strip('_')
+        filename = f"{safe_sprint_name or 'Sprint'}.pptx"
+
+        # Resolve epic display names
+        def detect_epic_name_local(fields):
+            candidates = ['customfield_10008', 'customfield_10006', 'epic', 'Epic Link', 'epic_link']
+            for key in candidates:
+                if key in fields and fields.get(key):
+                    val = fields.get(key)
+                    if isinstance(val, dict):
+                        return val.get('key') or val.get('name') or str(val)
+                    if isinstance(val, list) and val:
+                        first = val[0]
+                        if isinstance(first, dict):
+                            return first.get('key') or first.get('name') or str(first)
+                        return str(first)
+                    return str(val)
+            for k, v in fields.items():
+                if 'epic' in k.lower() and v:
+                    if isinstance(v, dict):
+                        return v.get('key') or v.get('name') or str(v)
+                    return str(v)
+            return None
+
+        # Gather epic candidates
+        epic_candidates = set()
+        for issues_in_label in grouped.values():
+            for issue in issues_in_label:
+                epic_id = detect_epic_name_local(issue.get('fields', {}))
+                if epic_id and epic_id != 'None':
+                    epic_candidates.add(str(epic_id))
+
+        epic_map = {}
+        # Batch lookup epic summaries using JQL search to avoid many single-issue requests
+        epic_keys = [e for e in epic_candidates if re.match(r'^[A-Z]+-\d+$', str(e))]
+        non_keys = [e for e in epic_candidates if e not in epic_keys]
+
+        # Fetch chunks helper
+        def chunks(lst, n):
+            for i in range(0, len(lst), n):
+                yield lst[i:i+n]
+
+        # We'll also try to detect the epic's parent (initiative) via the epic's 'parent' field.
+        parent_keys_to_fetch = set()
+        epic_parent_map = {}  # epic_key -> parent_key (if present)
+        # parent_key -> dict with 'display' and 'description' when parent object is embedded in issue JSON
+        embedded_parent_map = {}
+
+        def detect_parent_from_issue(issue_obj):
+            """Try multiple heuristics to find a parent/initiative key from an issue JSON.
+
+            Returns the parent key (e.g., 'EMSS-81') or None.
+            """
+            try:
+                fields_resp = issue_obj.get('fields', {})
+            except Exception:
+                return None
+            # 1) direct 'parent' field (common in Portfolio setups)
+            parent = fields_resp.get('parent')
+            if parent and isinstance(parent, dict):
+                pkey = parent.get('key')
+                if pkey:
+                    return pkey
+            # 2) some instances put initiative/parent in custom fields or differently named fields
+            for k, v in fields_resp.items():
+                if not k:
+                    continue
+                kl = k.lower()
+                if ('parent' in kl or 'initiative' in kl) and v:
+                    if isinstance(v, dict) and v.get('key'):
+                        return v.get('key')
+                    if isinstance(v, list) and v:
+                        first = v[0]
+                        if isinstance(first, dict) and first.get('key'):
+                            return first.get('key')
+            # 3) inspect issue links for a parent-like relation
+            for link in fields_resp.get('issuelinks', []) or []:
+                # Link types vary; try common patterns
+                t = link.get('type', {})
+                tname = (t.get('name') or '').lower()
+                # inwardIssue / outwardIssue may contain the related issue
+                for side in ('outwardIssue', 'inwardIssue'):
+                    rel = link.get(side)
+                    if not rel:
+                        continue
+                    rkey = rel.get('key')
+                    if not rkey:
+                        continue
+                    # If the link type name suggests a parent/child or initiative relation, accept it
+                    if any(x in tname for x in ('parent', 'child', 'initiative', 'is parent', 'is child', 'parent/child')):
+                        return rkey
+                    # Some instances store direction text in 'outward'/'inward' fields
+                    outward = (t.get('outward') or '').lower()
+                    inward = (t.get('inward') or '').lower()
+                    if any(x in outward for x in ('is parent', 'parent of', 'initiates', 'relates to')) or any(x in inward for x in ('is parent', 'parent of', 'initiates', 'relates to')):
+                        return rkey
+            # If we didn't already return, try a more permissive approach on linked issues:
+            # - accept any linked issue that looks like an EMSS initiative key (EMSS-\d+)
+            token_re = re.compile(r"\bEMSS-\d+\b")
+            for link in fields_resp.get('issuelinks', []) or []:
+                for side in ('outwardIssue', 'inwardIssue'):
+                    rel = link.get(side)
+                    if not rel:
+                        continue
+                    rkey = rel.get('key')
+                    if not rkey:
+                        continue
+                    # If the linked key appears to be an EMSS initiative, accept it
+                    if token_re.match(rkey):
+                        logger.debug("Found EMSS-linked parent key %s in issuelinks", rkey)
+                        return rkey
+
+            # 4) as a last resort, scan any string field for an EMSS-xxxx token (initiative in other project)
+            def _search_for_token(obj):
+                if isinstance(obj, str):
+                    m = token_re.search(obj)
+                    if m:
+                        return m.group(0)
+                    return None
+                if isinstance(obj, dict):
+                    for vv in obj.values():
+                        found = _search_for_token(vv)
+                        if found:
+                            return found
+                if isinstance(obj, list):
+                    for vv in obj:
+                        found = _search_for_token(vv)
+                        if found:
+                            return found
+                return None
+
+            found = _search_for_token(fields_resp)
+            if found:
+                logger.debug("Heuristically found parent token %s inside issue fields", found)
+                return found
+            return None
+
+        # Fetch all epics concurrently (10-20x faster than sequential)
+        update_progress("Fetching epic metadata (async, 10x faster)...")
+        logger.info("Fetching %d epics concurrently...", len(epic_keys))
+
+        # Sanitize epic keys to prevent injection before passing to async fetcher
+        sanitized_epic_keys = sanitize_jql_list(epic_keys, value_type='key')
+
+        # Fetch all epics in parallel (10 concurrent requests at a time)
+        epic_results = fetch_epics_sync(
+            JIRA_URL,
+            sanitized_epic_keys,
+            (JIRA_EMAIL, JIRA_API_TOKEN),
+            SSL_VERIFY,
+            fields=["summary", "parent", "issuelinks", "description"]
+        )
+
+        # Helper to extract description from nested field structures
+        def _extract_description_from_fields(field_dict, prefer_summary=None):
+            d = field_dict.get('description')
+            if d:
+                return d
+            # look for long string fields that look like descriptions
+            for kk, vv in field_dict.items():
+                if kk in ('summary', 'issuetype', 'status', 'priority'):
+                    continue
+                if isinstance(vv, str) and len(vv.strip()) > 40:
+                    if prefer_summary and vv.strip() == (prefer_summary or '').strip():
+                        continue
+                    return vv
+                if isinstance(vv, dict):
+                    if 'value' in vv and isinstance(vv['value'], str) and len(vv['value'].strip()) > 40:
+                        return vv['value']
+            return ""
+
+        # Process all fetched epics
+        for key, issue_data in epic_results.items():
+            if issue_data:
+                fields_resp = issue_data.get('fields', {})
+                logger.debug("Async fetch returned issue %s with fields: %s", key, list(fields_resp.keys()))
+
+                # Extract summary and create display string
+                summary = fields_resp.get('summary')
+                display = f"{key}: {summary}" if summary else key
+                epic_map[key] = display
+
+                # Try to find a parent (initiative) reference using heuristics
+                pkey = detect_parent_from_issue(issue_data)
+                if pkey:
+                    logger.debug("Detected parent %s for epic %s (async)", pkey, key)
+                    epic_parent_map[key] = pkey
+
+                    # Check if parent is embedded in the response
+                    pfield = fields_resp.get('parent')
+                    if pfield and isinstance(pfield, dict) and pfield.get('key') == pkey and pfield.get('fields') and pfield['fields'].get('summary'):
+                        # parent embedded with summary — record it so we can use it later without fetching
+                        ps = pfield['fields'].get('summary')
+                        pdesc_raw = _extract_description_from_fields(pfield['fields'], prefer_summary=ps)
+                        desc_excerpt = ""
+                        if pdesc_raw:
+                            if isinstance(pdesc_raw, dict):
+                                desc_excerpt = str(pdesc_raw)
+                            else:
+                                desc_excerpt = str(pdesc_raw).splitlines()[0][:120]
+                        display = f"{pkey}: {ps}" if ps else pkey
+                        if desc_excerpt:
+                            display = f"{display} — {desc_excerpt}"
+                        embedded_parent_map[pkey] = {"key": pkey, "display": display, "description": pdesc_raw}
+                        logger.debug("Parent %s embedded; recorded display: %s", pkey, display)
+                    else:
+                        parent_keys_to_fetch.add(pkey)
+            else:
+                # Epic fetch failed - use key as display
+                epic_map[key] = key
+                logger.debug("Failed to fetch epic %s (async)", key)
+
+        # For any epics where we still don't have a parent detected, try linkedIssues search
+        missing_parents = [k for k in epic_keys if k not in epic_parent_map]
+        # First, try a per-issue GET for any epics where the batch JQL didn't expose parent info
+        if missing_parents:
+            for ek in list(missing_parents):
+                try:
+                    url_issue = f"{JIRA_URL}/rest/api/2/issue/{ek}"
+                    r = _JIRA_SESSION.get(url_issue, params={"fields": "*all", "expand": "names,renderedFields"}, timeout=15)
+                    if r.status_code == 200:
+                        d = r.json()
+                        logger.debug("Per-issue GET returned for %s fields: %s", ek, list(d.get('fields', {}).keys()))
+                        pkey = detect_parent_from_issue(d)
+                        if pkey:
+                            epic_parent_map[ek] = pkey
+                            parent_obj = d.get('fields', {}).get('parent')
+                            if parent_obj and isinstance(parent_obj, dict) and parent_obj.get('key') == pkey and parent_obj.get('fields') and parent_obj['fields'].get('summary'):
+                                ps = parent_obj['fields'].get('summary')
+                                pdesc_raw = _extract_description_from_fields(parent_obj['fields'], prefer_summary=ps)
+                                desc_excerpt = ""
+                                if pdesc_raw:
+                                    if isinstance(pdesc_raw, dict):
+                                        desc_excerpt = str(pdesc_raw)
+                                    else:
+                                        desc_excerpt = str(pdesc_raw).splitlines()[0][:120]
+                                display = f"{pkey}: {ps}" if ps else pkey
+                                if desc_excerpt:
+                                    display = f"{display} — {desc_excerpt}"
+                                embedded_parent_map[pkey] = {"key": pkey, "display": display, "description": pdesc_raw}
+                                logger.debug("Per-issue parent %s embedded; recorded display: %s", pkey, display)
+                            else:
+                                parent_keys_to_fetch.add(pkey)
+                            # remove from missing_parents list since we found something
+                            if ek in missing_parents:
+                                missing_parents.remove(ek)
+                except Exception:
+                    logger.debug("Per-issue GET failed for %s", ek, exc_info=True)
+
+        if missing_parents:
+            for ek in missing_parents:
+                # First try: look for Initiative in EMSS project linked to this epic
+                # Sanitize epic key to prevent JQL injection
+                ek_sanitized = sanitize_jql_value(ek, value_type='key')
+                jql1 = f'project = EMSS AND issue in linkedIssues("{ek_sanitized}") AND issuetype = Initiative'
+                payload1 = {"jql": jql1, "fields": "summary", "maxResults": 5}
+                try:
+                    data1 = jql_search(payload1)
+                    if data1:
+                        issues1 = data1.get('issues', [])
+                        if issues1:
+                            pk = issues1[0].get('key')
+                            epic_parent_map[ek] = pk
+                            parent_keys_to_fetch.add(pk)
+                            continue
+                except Exception:
+                    pass
+                # Fallback: any linked issue (take first), across projects
+                # Sanitize epic key to prevent JQL injection
+                ek_sanitized = sanitize_jql_value(ek, value_type='key')
+                jql2 = f'issue in linkedIssues("{ek_sanitized}")'
+                payload2 = {"jql": jql2, "fields": "summary", "maxResults": 5}
+                try:
+                    data2 = jql_search(payload2)
+                    if data2:
+                        issues2 = data2.get('issues', [])
+                        if issues2:
+                            pk = issues2[0].get('key')
+                            epic_parent_map[ek] = pk
+                            parent_keys_to_fetch.add(pk)
+                except Exception:
+                    pass
+
+        # Now fetch parent (initiative) details for any parents we need (summary/description)
+        initiative_map = {}  # parent_key -> display string (key: summary - short description)
+        if parent_keys_to_fetch:
+            parent_keys = list(parent_keys_to_fetch)
+            for pchunk in chunks(parent_keys, 50):
+                # Sanitize parent keys to prevent JQL injection
+                sanitized_pchunk = sanitize_jql_list(pchunk, value_type='key')
+                pq = ",".join(sanitized_pchunk)
+                pjql = f"key in ({pq})"
+                # Use the API v3 JQL search endpoint
+                ppayload = {"jql": pjql, "fields": "summary,description", "maxResults": 100}
+                try:
+                    pdata = jql_search(ppayload)
+                    if pdata:
+                        for pitem in pdata.get('issues', []):
+                            pkey = pitem.get('key')
+                            pfields = pitem.get('fields', {})
+                            psummary = pfields.get('summary')
+
+                            pdescription_raw = _extract_description_from_fields(pfields, prefer_summary=psummary)
+                            # Use first line or short excerpt of description to keep slides tidy
+                            desc_excerpt = ""
+                            if pdescription_raw:
+                                if isinstance(pdescription_raw, dict):
+                                    desc_excerpt = str(pdescription_raw)
+                                else:
+                                    desc_excerpt = str(pdescription_raw).splitlines()[0][:120]
+                            display = f"{pkey}: {psummary}" if psummary else pkey
+                            if desc_excerpt:
+                                display = f"{display} — {desc_excerpt}"
+                            initiative_map[pkey] = {"key": pkey, "display": display, "description": pdescription_raw}
+                    else:
+                        # On failure, at least seed with keys
+                        for pk in pchunk:
+                            initiative_map[pk] = pk
+                except Exception:
+                    for pk in pchunk:
+                        initiative_map[pk] = pk
+
+        # Merge any embedded parent displays we discovered earlier so we don't need to fetch them
+        # (embedded_parent_map is populated when per-issue JSON contained a parent object with summary).
+        if embedded_parent_map:
+            for pk, info in embedded_parent_map.items():
+                if pk not in initiative_map:
+                    # info is a dict {display, description}
+                    # ensure embedded info has the key present
+                    if isinstance(info, dict) and 'key' not in info:
+                        info['key'] = pk
+                    initiative_map[pk] = info
+                    logger.debug("Seeded initiative_map from embedded_parent_map for %s -> %s", pk, info.get('display'))
+
+        # Build epic -> initiative display mapping to pass into presentation (epic_goals param)
+        epic_initiative_map = {}
+        for epic_key, parent_key in epic_parent_map.items():
+            # Prefer a fetched initiative info (dict), then an embedded parent info dict, then fall back to showing the raw parent key.
+            if parent_key in initiative_map:
+                epic_initiative_map[epic_key] = initiative_map[parent_key]
+            elif parent_key in embedded_parent_map:
+                epic_initiative_map[epic_key] = embedded_parent_map[parent_key]
+            elif parent_key:
+                # We couldn't fetch summary/description due to permissions or API errors. Show the raw key so the slide isn't blank.
+                epic_initiative_map[epic_key] = {"key": parent_key, "display": parent_key, "description": ""}
+            else:
+                epic_initiative_map[epic_key] = None
+
+        # Non-key epics: use the value itself as display
+        for nk in non_keys:
+            epic_map[nk] = nk
+
+        # Prepare planned items for next sprint: stories from next planned sprint + in-progress stories from this sprint
+        def _is_story_or_task(issue):
+            try:
+                itype = issue.get('fields', {}).get('issuetype', {}).get('name', '')
+            except Exception:
+                itype = ''
+            return itype and itype.lower() in ('story', 'task')
+
+        DONE_STATUSES = {"done", "closed", "resolved"}
+        CANCELLED_STATUSES = {"cancelled", "canceled", "removed", "declined"}
+
+        # In-progress stories from current sprint
+        in_progress = []
+        for issues_in_label in grouped.values():
+            for issue in issues_in_label:
+                if not _is_story_or_task(issue):
+                    continue
+                status_name = (issue.get('fields', {}).get('status', {}).get('name') or '').lower()
+                if status_name and status_name not in DONE_STATUSES and status_name not in CANCELLED_STATUSES:
+                    in_progress.append(issue)
+
+        # Stories from the next planned sprint (if present)
+        planned_next = []
+        try:
+            next_id = get_next_sprint_id()
+            if next_id:
+                next_issues = get_issues(next_id)
+                for ni in next_issues:
+                    if _is_story_or_task(ni):
+                        planned_next.append(ni)
+        except Exception as e:
+            logger.debug("Could not fetch next sprint issues: %s", e)
+
+        # Merge planned items (dedupe by key)
+        planned_by_key = {}
+        for it in planned_next + in_progress:
+            k = it.get('key')
+            if not k:
+                continue
+            planned_by_key[k] = it
+        planned_items = list(planned_by_key.values())
+
+        # Build velocity history
+        velocity_history = []
+        try:
+            velocity_history = build_velocity_history(
+                JIRA_URL,
+                BOARD_ID,
+                (JIRA_EMAIL, JIRA_API_TOKEN),
+                FIELD_STORY_POINTS,
+                max_sprints=10,
+            )
+        except Exception as exc:
+            logger.debug("Unable to build velocity history: %s", exc)
+
+        # Create presentation
+        update_progress("Generating PowerPoint file...")
+        output_path = output_dir / filename
+        create_presentation(
+            grouped,
+            sprint_name,
+            sprint_start,
+            sprint_end,
+            filename=str(output_path),
+            epic_map=epic_map,
+            epic_goals=epic_initiative_map,
+            planned_items=planned_items,
+            velocity_history=velocity_history,
+        )
+
+        update_progress("Done!")
+
+        # Count issues and epics for result
+        issue_count = sum(len(v) for v in grouped.values())
+        epic_count = len(epic_map)
+
+        return {
+            'success': True,
+            'file_path': output_path,
+            'sprint_name': sprint_name,
+            'sprint_id': sprint_id,
+            'issue_count': issue_count,
+            'epic_count': epic_count,
+            'error': None
+        }
+
+    except Exception as e:
+        logger.exception("Error generating PowerPoint presentation")
+        return {
+            'success': False,
+            'file_path': None,
+            'sprint_name': None,
+            'sprint_id': sprint_id,
+            'issue_count': 0,
+            'epic_count': 0,
+            'error': str(e)
+        }

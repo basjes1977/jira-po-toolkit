@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block title %}Error{% endblock %}
+
+{% block content %}
+<h2>Sanity Check Error</h2>
+
+<div class="error">
+    <p>An error occurred while running the sanity check:</p>
+    <p><strong>{{ error }}</strong></p>
+</div>
+
+<p><a href="/sanity-checks" class="button button-secondary">← Back to Sanity Checks</a></p>
+{% endblock %}

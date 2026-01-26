@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Sanity Checks{% endblock %}
+
+{% block content %}
+<div class="welcome-section">
+    <h2>Sanity Checks</h2>
+    <p>Check stories for missing labels and acceptance criteria.</p>
+</div>
+
+<div class="operations">
+    <div class="operation">
+        <h3>📝 To Refine Stories</h3>
+        <p>Check stories in 'To Refine' status for missing labels and acceptance criteria.</p>
+        <a href="/sanity-checks/to-refine" class="button">Check To Refine →</a>
+    </div>
+
+    <div class="operation">
+        <h3>✅ Ready Stories</h3>
+        <p>Check stories in 'Ready' status for missing labels and acceptance criteria.</p>
+        <a href="/sanity-checks/ready" class="button">Check Ready →</a>
+    </div>
+</div>
+
+<div class="info-section">
+    <h3>ℹ️ What Gets Checked</h3>
+    <ul>
+        <li><strong>Labels:</strong> All stories should have at least one label (NLMS, IEMS, ESMS, etc.)</li>
+        <li><strong>Acceptance Criteria:</strong> Stories should have bullet points in the acceptance criteria field</li>
+        <li>Issues with missing information will be highlighted for review</li>
+    </ul>
+</div>
+{% endblock %}

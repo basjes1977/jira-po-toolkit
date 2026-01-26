@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+
+{% block title %}Setup Wizard{% endblock %}
+
+{% block content %}
+<h2>🚀 Welcome to Jira Presentation Tool</h2>
+<p>Let's configure your Jira environment to get started.</p>
+
+{% if error %}
+<div class="error">
+    <p>{{ error }}</p>
+</div>
+{% endif %}
+
+<form method="POST" id="setup-form">
+    <h3>Step 1: Jira Connection</h3>
+
+    <label for="jira_url">Jira Instance URL *</label>
+    <input type="url"
+           id="jira_url"
+           name="jira_url"
+           placeholder="https://yourcompany.atlassian.net"
+           value="{{ form_data.jira_url if form_data else '' }}"
+           required>
+    <p class="info">Your Jira Cloud URL</p>
+
+    <label for="email">Atlassian Email *</label>
+    <input type="email"
+           id="email"
+           name="email"
+           placeholder="your.email@company.com"
+           value="{{ form_data.email if form_data else '' }}"
+           required>
+
+    <label for="api_token">Jira API Token *</label>
+    <input type="password"
+           id="api_token"
+           name="api_token"
+           placeholder="Your Jira API token"
+           value="{{ form_data.api_token if form_data else '' }}"
+           required>
+    <p class="info">
+        Create an API token at:
+        <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank">
+            Atlassian API Tokens
+        </a>
+    </p>
+
+    <button type="button" id="test-connection" class="button button-secondary">
+        Test Connection
+    </button>
+    <div id="connection-result" style="margin-top: 1rem;"></div>
+
+    <hr style="margin: 2rem 0;">
+
+    <h3>Step 2: Jira Board</h3>
+
+    <label for="board_id">Board ID *</label>
+    <select id="board_id" name="board_id" required>
+        <option value="">-- Select a board or enter ID manually --</option>
+    </select>
+    <p class="info">Or enter your board ID manually if you know it</p>
+
+    <hr style="margin: 2rem 0;">
+
+    <h3>Step 3: Custom Fields (Optional)</h3>
+    <p class="info">These are common defaults. Change only if your Jira instance uses different field IDs.</p>
+
+    <label for="story_points">Story Points Field</label>
+    <input type="text"
+           id="story_points"
+           name="story_points"
+           value="{{ form_data.story_points if form_data else 'customfield_10024' }}">
+
+    <label for="epic_link">Epic Link Field</label>
+    <input type="text"
+           id="epic_link"
+           name="epic_link"
+           value="{{ form_data.epic_link if form_data else 'customfield_10031' }}">
+
+    <label for="acceptance_criteria">Acceptance Criteria Field</label>
+    <input type="text"
+           id="acceptance_criteria"
+           name="acceptance_criteria"
+           value="{{ form_data.acceptance_criteria if form_data else 'customfield_10140' }}">
+
+    <hr style="margin: 2rem 0;">
+
+    <h3>Step 4: SSL Verification</h3>
+
+    <label>
+        <input type="radio" name="ssl_verify" value="true" checked>
+        Standard SSL verification (recommended)
+    </label><br>
+
+    <label>
+        <input type="radio" name="ssl_verify" value="false">
+        Disable SSL verification (not recommended)
+    </label>
+
+    <hr style="margin: 2rem 0;">
+
+    <button type="submit" class="button">Save Configuration</button>
+</form>
+
+<script>
+document.getElementById('test-connection').addEventListener('click', function() {
+    const url = document.getElementById('jira_url').value;
+    const email = document.getElementById('email').value;
+    const token = document.getElementById('api_token').value;
+    const resultDiv = document.getElementById('connection-result');
+    const boardSelect = document.getElementById('board_id');
+
+    if (!url || !email || !token) {
+        resultDiv.innerHTML = '<p class="error">Please fill in all connection fields first.</p>';
+        return;
+    }
+
+    resultDiv.innerHTML = '<p class="info">Testing connection...</p>';
+
+    const formData = new FormData();
+    formData.append('jira_url', url);
+    formData.append('email', email);
+    formData.append('api_token', token);
+
+    fetch('/setup/test-connection', {
+        method: 'POST',
+        body: formData
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            resultDiv.innerHTML = '<p class="success">✓ ' + data.message + '</p>';
+
+            // Populate board dropdown
+            if (data.boards && data.boards.length > 0) {
+                boardSelect.innerHTML = '<option value="">-- Select a board --</option>';
+                data.boards.forEach(board => {
+                    const option = document.createElement('option');
+                    option.value = board.id;
+                    option.textContent = `${board.name} (ID: ${board.id})`;
+                    boardSelect.appendChild(option);
+                });
+            } else {
+                resultDiv.innerHTML += '<p class="warning">No boards found. You may need to enter the board ID manually.</p>';
+            }
+        } else {
+            resultDiv.innerHTML = '<p class="error">✗ ' + data.message + '</p>';
+        }
+    })
+    .catch(err => {
+        resultDiv.innerHTML = '<p class="error">✗ Connection test failed: ' + err + '</p>';
+    });
+});
+
+// Allow manual board ID entry
+document.getElementById('board_id').addEventListener('change', function(e) {
+    if (e.target.value === 'manual') {
+        const manualId = prompt('Enter your Board ID:');
+        if (manualId) {
+            const option = document.createElement('option');
+            option.value = manualId;
+            option.textContent = `Board ID: ${manualId}`;
+            option.selected = true;
+            e.target.appendChild(option);
+        }
+    }
+});
+</script>
+{% endblock %}
